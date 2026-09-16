@@ -2,23 +2,25 @@
 // Generate tests/vectors/marked_comments.json: which HTML comments Claude Code
 // strips from a rule body.
 //
-// Claude Code tokenizes a rule body containing "<!--" with marked (a 15-17
-// release, GFM off). For every top-level html token whose raw text, ignoring
-// leading white space, starts with "<!--" and contains "-->", it deletes each
-// "<!-- ... -->" from that raw text and keeps the rest only if it is not blank;
-// every other token's raw text is kept. This script applies that behavior with
-// a real marked release to curated bodies and to a seeded random corpus, for
-// src/c2c_rulesync/markdown_blocks.py to be tested against.
+// Claude Code tokenizes a rule body containing "<!--" with a marked lexer, GFM
+// off, that behaves as marked 15.0.12 (observed: identical output on 23,031
+// bodies; marked 16 and later differ, for example by keeping link reference
+// definitions). For every top-level html token whose raw text, ignoring leading
+// white space, starts with "<!--" and contains "-->", it deletes each
+// "<!-- ... -->" from that raw text and keeps the rest only if trim() does not
+// empty it; every other token's raw text is kept. This script applies that
+// behavior with marked 15.0.12 to curated bodies and to a seeded random corpus,
+// for src/c2c_rulesync/markdown_blocks.py to be tested against.
 //
 // Usage:
-//   npm install --prefix <dir> marked@17.0.6
+//   npm install --prefix <dir> marked@15.0.12
 //   node scripts/gen_comment_vectors.mjs <dir>/node_modules/marked tests/vectors/marked_comments.json
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 
-const EXPECTED_VERSION = "17.0.6";
+const EXPECTED_VERSION = "15.0.12";
 const RANDOM_COUNT = 3000;
 const RANDOM_SEED = 1;
 
@@ -55,6 +57,43 @@ const CURATED = [
   "Use `Vec<String>` in examples.\n\n<!--\nLonger rationale\nacross lines.\n-->\n\n```rust\nlet v: Vec<String> = Vec::new(); // <!-- not a comment -->\n```\n",
   "<!-- TODO: expand -->",
   "Intro paragraph\n<!-- note -->\n\n## Section\n\nText <!-- inline stays --> here.\n",
+  // Link reference definitions: dropped unless they continue a paragraph.
+  "Follow the [style guide][style].\n\n<!-- TODO -->\n[style]: https://example.com/style\n",
+  "Intro text\n[style]: https://example.com/style\n<!-- note -->\n",
+  "<!-- note -->\n[style]: <https://example.com/style> \"Style\"\n[style]: https://example.com/other\nSee [style].\n",
+  "> [style]: https://example.com/style\n<!-- note -->\n",
+  "- item\n\n  [style]: https://example.com/style\n<!-- note -->\n",
+  "[]: https://example.com\n[style]:\n<!-- note -->\n",
+  // A space or tab left at the end becomes a line break of the comment token.
+  "# Rules\n\nUse X.\n<!-- note -->\n\t",
+  "Use X.\n<!-- note -->\n ",
+  // A comment right after a block quote, and comments in a declaration that
+  // ends at its first ">".
+  "> Note\n>\n  <!-- why -->\nText\n",
+  "<!X\n<!-- a --><!-- b -->\nend -->",
+  // The remainder is blank by JavaScript's trim(), not Python's str.strip().
+  "Use X.\n\n<!-- note -->\u0085\nMore\n",
+  "Use X.\n\n<!-- note -->\ufeff\u3000\nMore\n",
+  "Use X.\n\n<!-- note -->\u001c\nMore\n",
+  "Title\n<!-- note -->\n=====\n",
+  "Line one\r<!-- note -->\rLine two\r",
+  // Comments inside the other kinds of HTML block stay.
+  "<script>\n<!-- kept -->\n</script>\n<!-- note -->\n",
+  "<?php\n<!-- kept -->\n?>\n<!-- note -->\n",
+  "<![CDATA[\n<!-- kept -->\n]]>\n<!-- note -->\n",
+  "<custom-tag>\n<!-- kept -->\n\n<!-- note -->\n",
+  "Text\n<DIV>\n<!-- note -->\n",
+  "<\u017fcript>\n<!-- note -->\n",
+  "- item\n<!-- note -->\n- item\n",
+  "> - item\nlazy\n<!-- note -->\n",
+  // A lazily continued block quote rebuilds its raw text from lengths in
+  // UTF-16 code units.
+  "> > <!-- note -->\n> \u{1F600} quoted\nlazy\n",
+  "> - \u{1F600}\n> >\n> > <!-- note -->\nlazy\n",
+  // JavaScript's `.` stops at U+2028, so this line is not an ATX heading.
+  "<!-- note -->\n# Title\u2028\n\t",
+  // trimEnd() removes U+FEFF from the end of a list.
+  "- item\n\ufeff\n <!-- note -->\n",
 ];
 
 // mulberry32: small, seedable, and identical on every platform.
@@ -76,7 +115,8 @@ const LINES = [
   "<custom-tag>", "<span>inline</span>", "<!-- c -->", "  <!-- c -->", "   <!-- c -->", "    <!-- c -->",
   "<!-- start", "end -->", "<!-- a --> tail", "text <!-- mid --> text", "<!-- a --><!-- b -->", "<!---->",
   "<!-->", "- <!-- in item -->", "  <!-- item indent -->", "[ref]: https://example.com", "<?php ?>",
-  "<!DOCTYPE html>", "Line  ", "\\<!-- escaped -->",
+  "<!DOCTYPE html>", "Line  ", "\\<!-- escaped -->", "> - item", "lazy", "[ref]: <https://x> \"t\"", " ", "\t",
+  "<!-- c -->\u0085", "<!-- c -->\ufeff", "<DIV>", "<?php", "?>", "<![CDATA[", "]]>", "> > nested", "\u{1F600} emoji",
 ];
 
 function randomBodies() {

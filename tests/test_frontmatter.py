@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -15,12 +16,10 @@ COMMENT_VECTORS = json.loads(
     (Path(__file__).parent / "vectors" / "marked_comments.json").read_text(encoding="utf-8")
 )["vectors"]
 
-# Random bodies where the approximation of marked's block structure differs.
-# Both combine a stray `</script>` line, a comment and a setext underline.
-KNOWN_COMMENT_DIVERGENCES = {
-    "</script>\n<!-- a\nb -->\n-----\nmore text\n> quote\n> quote\n- item\n",
-    "</script>\r\n<!-- a\nb -->\r\n=====\r\n",
-}
+# Random bodies on which strip_block_comments is known to differ from marked
+# 15.0.12. There are none: keep it that way unless a difference is documented in
+# docs/behavior.md.
+KNOWN_COMMENT_DIVERGENCES: set[str] = set()
 
 
 # Front matter detection ------------------------------------------------------
@@ -241,3 +240,31 @@ def test_comment_stripping_matches_marked_on_random_bodies() -> None:
 
     assert len([v for v in COMMENT_VECTORS if v["set"] == "random"]) == 3000
     assert mismatches <= KNOWN_COMMENT_DIVERGENCES, sorted(mismatches - KNOWN_COMMENT_DIVERGENCES)
+
+
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "<!-- note -->\n",
+        "<div>\n\n<!-- note -->\n",
+        "- item\n<!-- note -->\n",
+        "Paragraph text.\n<!-- note -->\n\n",
+        # marked scans ahead for a setext underline at each of these paragraphs.
+        "text\n<!-- note -->x\n",
+        "> quote\nlazy\n",
+    ],
+)
+def test_comment_stripping_takes_linear_time(unit: str) -> None:
+    body = "<!-- note -->\n" + unit * (256 * 1024 // len(unit))
+
+    start = time.perf_counter()
+    strip_block_comments(body)
+
+    # About 0.1 s when linear; a quadratic pass over 256 KiB takes seconds.
+    assert time.perf_counter() - start < 2.0
+
+
+def test_block_quotes_nested_past_the_recursion_limit_leave_the_body_unchanged() -> None:
+    body = "<!-- note -->\n" + "> " * sys.getrecursionlimit() + "quote\n"
+
+    assert strip_block_comments(body) == body

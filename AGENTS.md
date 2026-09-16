@@ -29,7 +29,7 @@ uv run mypy
 node scripts/gen_ignore_vectors.mjs tests/vectors/node_ignore_7_0_5.json   # network
 bun scripts/gen_js_case_classes.mjs src/c2c_rulesync/_js_case.py         # Bun runtime
 bun scripts/gen_yaml_vectors.mjs tests/vectors/bun_yaml.json               # Bun runtime
-node scripts/gen_comment_vectors.mjs <marked 17.0.6 dir> tests/vectors/marked_comments.json
+node scripts/gen_comment_vectors.mjs <marked 15.0.12 dir> tests/vectors/marked_comments.json
 ```
 
 ## Contributing

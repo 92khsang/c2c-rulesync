@@ -83,25 +83,50 @@ result may differ from Claude Code.
 
 ### Body
 
-When the body contains `<!--`, block-level HTML comments are removed as marked
-15-17 tokenizes them (Claude Code uses a marked release in that range, observed
-from its HTML tokenizer). The body's line endings become `\n`, and:
+When the body contains `<!--`, Claude Code removes block-level HTML comments
+with marked's lexer, GFM off, and that lexer behaves as marked **15.0.12**
+(observed: the two give identical output on 23,031 bodies). Later releases
+differ: marked 16.4.2 and 17.0.6 disagree with it on about 7% of
+`tests/vectors/marked_comments.json`, for example by keeping link reference
+definitions. The body's line endings become `\n`, and (vector-verified):
 
 - A comment starting a block (up to three spaces of indentation, outside code,
   lists, block quotes and other HTML blocks) is removed, along with the rest of
-  its last line if that is blank, and the line breaks after it.
+  its last line if JavaScript's `trim()` empties that, and the line breaks
+  after it. `trim()` removes U+FEFF and U+3000 but not U+0085.
 - A comment inside a paragraph line, a list item, a block quote or code stays.
 - An unclosed comment stays.
+- A link reference definition such as `[style]: https://example.com/style`
+  disappears unless it continues a paragraph.
+- A single space or tab ending the body right after a comment line is removed
+  with the comment.
+- A block quote continued by lines without `>` can come out with its text
+  rearranged, because marked rebuilds its raw text from lengths measured in
+  different strings.
 
-`src/c2c_rulesync/markdown_blocks.py` approximates marked's block structure
-rather than porting marked. `tests/vectors/marked_comments.json` holds marked
-17.0.6's output for 31 curated bodies and 3,000 random ones: the curated bodies
-all match, and 2 random bodies differ. Both combine a stray `</script>` line, a
-comment and a setext underline.
+`src/c2c_rulesync/markdown_blocks.py` ports marked 15.0.12's block lexer,
+keeping only what decides the raw text of top-level tokens, and spells out the
+JavaScript semantics it relies on: `\s`, `.`, case-insensitive matching and
+UTF-16 lengths. `tests/vectors/marked_comments.json` holds marked 15.0.12's
+output for 58 curated bodies and 3,000 random ones, and the port matches all
+of them. A differential run of 500,000 further generated bodies, built from
+comments, every kind of HTML block, fences, indented code, lists, block quotes,
+headings, link definitions, CRLF and CR line endings and Unicode white space,
+found no difference either.
+
+The one known difference: block quotes nested more than about 490 levels deep
+exceed Python's recursion limit, and the body is then kept unchanged, comments
+included. marked under Bun 1.4.2 handles 4,000 levels.
+
+Speed differs too. marked takes quadratic time on some bodies: 4,000 paragraphs
+each followed by a comment line with trailing text take 79 s under Bun 1.4.2
+(0.3 s under Node.js 24), while the port takes linear time on them. Lazily
+continued nested block quotes stay quadratic in the port: 8,000 of them take 9 s
+in the port and 50 s in marked under Bun 1.4.2.
 
 ```bash
-npm install --prefix /tmp/marked-17 marked@17.0.6
-node scripts/gen_comment_vectors.mjs /tmp/marked-17/node_modules/marked tests/vectors/marked_comments.json
+npm install --prefix /tmp/marked-15 marked@15.0.12
+node scripts/gen_comment_vectors.mjs /tmp/marked-15/node_modules/marked tests/vectors/marked_comments.json
 ```
 
 ## Parsing front matter YAML
