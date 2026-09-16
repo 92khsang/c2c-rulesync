@@ -93,7 +93,10 @@ starting Codex:
 |---|---|
 | `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. |
 | `C2C_RULESYNC_USER_RULES` | `0` turns user rules off. |
-| `C2C_RULESYNC_STATE_DIR` | An absolute directory for the record of what each session received. The default is `$XDG_STATE_HOME/c2c-rulesync`, or `~/.local/state/c2c-rulesync`. |
+| `C2C_RULESYNC_STATE_DIR` | An absolute directory, used only by c2c-rulesync, for the record of what each session received. A relative value is ignored. The default is `$XDG_STATE_HOME/c2c-rulesync`, or `~/.local/state/c2c-rulesync`. |
+
+If the record cannot be written, the hook says so when a session starts and
+delivers only rules without `paths:`.
 
 ## What Codex sees
 
