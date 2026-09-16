@@ -16,6 +16,62 @@ Each behavior is labeled with how it is known:
 | observed | Observed in the installed Claude Code without an end-to-end confirmation. |
 | oracle-confirmed | Recorded from a real Claude Code session through the `InstructionsLoaded` hook, committed under `tests/parity/`. |
 
+## Which tool calls load rules
+
+Claude Code loads path-scoped rules when it reads a file, including before an
+edit, which its tools require. Codex has no read tool: the model reads files
+with shell commands and edits them with `apply_patch`. c2c-rulesync therefore
+treats the files a tool call reads or writes as read
+(`src/c2c_rulesync/touched.py`). This loads rules for more tool calls than
+Claude Code would, never for fewer.
+
+### `apply_patch`
+
+The file of every `*** Add File:`, `*** Update File:` and `*** Delete File:`
+header, and the destination of `*** Move to:`, between `*** Begin Patch` and
+`*** End Patch`. Headers are read after trimming white space, as Codex reads
+them.
+
+### `view_image` and other tools
+
+The `path`, `file_path` or `filePath` string of the tool input, for any tool the
+hook is wired to.
+
+### Shell commands (`Bash`)
+
+`src/c2c_rulesync/shell.py` splits the command the way a POSIX shell would,
+closely enough to find:
+
+- the file operands of `cat`, `nl`, `head`, `tail`, `less`, `more`, `bat` and
+  `tee`, of `sed`, `awk`, `grep` and `rg` after their script or pattern, and of
+  `git diff`, `git show` and `git log` after `--` (and `git blame`'s file);
+- redirection targets (`<`, `>`, `>>`, `&>` and similar), except `/dev/*`;
+- `apply_patch` run through the shell, with its patch in a here-document or an
+  argument;
+- commands inside `bash -c`, `sh -c` and `zsh -c` scripts, `$(...)`, backquotes,
+  `<(...)` and subshells;
+- commands behind `env`, `sudo`, `timeout`, `nice`, `nohup`, `time`,
+  `command`, `exec` and variable assignments.
+
+`cd` and `pushd` change the directory later relative paths resolve against,
+except inside a subshell, a pipeline or a background command. After `cd` to a
+directory only the shell knows (no argument, `-`, a variable or command output)
+or after `popd`, relative paths are ignored until the next `cd` to a known
+directory. `~` expands to the home directory.
+
+It ignores:
+
+- operands that are existing directories, so `grep -r TODO src` loads nothing
+  for `src`, as Claude Code's search tools load nothing;
+- `find`, `ls` and every command not listed above;
+- words the shell would expand: variables, command output, and unquoted `*`,
+  `?` and `[`;
+- here-document bodies other than a patch.
+
+Codex runs a command in its tool call's `workdir` when one is given, but does
+not pass `workdir` to hooks, so relative paths resolve against the session's
+working directory.
+
 ## Reading a rule file
 
 `src/c2c_rulesync/frontmatter.py` turns a rule file into an injected body and a
