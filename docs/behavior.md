@@ -51,23 +51,30 @@ When a file is read:
 3. rules of the working directory and its ancestors whose globs match,
    outermost first.
 
-A file outside the working directory loads no rule. A relative path that is
-empty or starts with `..`, including a directory named `..foo`, matches no
-glob. When the path relative to the base directory leaves it, the file's parent
-directory is resolved through links and the path is tried again; the file
-itself is never resolved, so `src/link.ts` linking to `lib/real.ts` matches
-`src/**`, not `lib/**`.
+A read loads rules only when the path read, each link it passes through as a
+file, and its resolved path all lie inside the working directory: the resolved
+working directory, or the directory as the session was started in it (`$PWD`
+for Claude Code, the payload's `cwd` for Codex). So a file reached through a link
+leaving the working directory loads nothing, and neither does a file outside it.
+A relative path that is empty or starts with `..`, including a directory named
+`..foo`, matches no glob. When the path relative to the base directory leaves
+it, the file's parent directory is resolved through links and the path is tried
+again; the file itself is never resolved, so `src/link.ts` linking to
+`lib/real.ts` inside the working directory matches `src/**`, not `lib/**`.
 
-A session loads each rule file at most once, and reading a rule file counts as
-loading it, so a later matching read does not load it again. Within one scan, a
-file reached twice, for example through a link, loads once. When the user rules
+A session loads each rule file at most once. Reading a rule file by its own
+path counts as loading it, so neither that read nor a later match loads it; a
+rule read through a link to it still loads later. Within one scan, a file
+reached twice, for example through a link, loads once. When the user rules
 directory is also a project rules directory, as `~/.claude/rules` is for a
 session under the home directory, the user copy loads first and wins; this
 follows from the load order and has not been checked in a session.
 
 A rule file is skipped when its body is empty after front matter and comments
 are removed, or when it is larger than 4 MiB (c2c-rulesync warns). Invalid
-UTF-8 is replaced and loads, with a warning.
+UTF-8 in a file is replaced and loads, with a warning; a file or directory whose
+name is not valid UTF-8 is skipped, as Claude Code's runtime cannot open it.
+c2c-rulesync does not walk rules directories nested more than 256 levels deep.
 
 ### Git worktrees
 
@@ -76,6 +83,13 @@ repository, such as `repo/.claude/worktrees/w1`, the main repository's
 directories from its root down to the worktree root are not ancestors for rule
 loading. The worktree's own checked-out `.claude/rules` loads instead, and
 ancestors above the main repository still load.
+
+- The worktree must be registered in the repository, and the repository's
+  record must point back to it; a stale record does not skip anything.
+- For a worktree of a bare repository, the bare repository's directory is the
+  main root.
+- An unreadable, oversized or non-regular `.git` or `commondir` file means no
+  worktree.
 
 ### Links
 
@@ -86,9 +100,12 @@ ancestors above the main repository still load.
 - A project rules entry whose resolved path is not its own place in the
   directory must resolve inside the working directory. An ancestor rules
   directory is outside the working directory, so even its link to a file
-  beside it is skipped.
-- These checks do not apply when the rules directory is reached through a
-  linked parent, such as a linked `.claude`: rules from anywhere load.
+  beside it is skipped. The same holds in a rules directory reached through a
+  linked `.claude`: its own files load, its links leaving the working directory
+  do not.
+- These containment checks ignore case (c2c-rulesync approximates Claude Code's
+  folding with lower case), so on a case-sensitive file system a link from
+  `Proj` to `proj/shared.md` counts as inside `Proj`.
 - User rules may link anywhere.
 
 ### Not implemented
@@ -97,9 +114,13 @@ Claude Code also loads instructions that c2c-rulesync does not bring to Codex:
 
 - `CLAUDE.md` and `CLAUDE.local.md` files, at any level;
 - the managed (system-wide) rules directory;
-- rules in `--add-dir` directories with
-  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`;
-- `@path` imports inside rule files, and approved external imports;
+- directories added with `--add-dir` or `permissions.additionalDirectories`:
+  Claude Code loads rules for files read there, and with
+  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` their rules at session start.
+  Codex does not pass its added directories to hooks;
+- `@path` imports inside rule files;
+- rules linked from outside the working directory after a project approved
+  external imports in Claude Code, which then load at session start;
 - `claudeMdExcludes` settings.
 
 ## Which tool calls load rules

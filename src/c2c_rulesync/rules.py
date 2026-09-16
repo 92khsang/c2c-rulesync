@@ -28,6 +28,8 @@ PROJECT = "project"
 
 # Claude Code skips a memory file larger than this.
 MAX_RULE_BYTES = 4 * 1024 * 1024
+# Rules directories nested deeper than this are not walked.
+MAX_DIRECTORY_DEPTH = 256
 _RULES_DIR = (".claude", "rules")
 
 
@@ -67,12 +69,16 @@ class RuleFinder:
 
     Args:
         cwd: The session's working directory. It is resolved, as Claude Code
-            resolves its own working directory.
+            resolves its own working directory; the spelling given also counts
+            as the working directory for files read through it, as Claude Code
+            treats ``$PWD``.
         user_rules_dir: The user rules directory, or ``None`` to skip user rules.
     """
 
     def __init__(self, cwd: str, user_rules_dir: str | None) -> None:
         self.cwd = os.path.realpath(cwd)
+        spelling = os.path.normpath(os.path.abspath(cwd))
+        self._working_dirs = [self.cwd] if spelling == self.cwd else [self.cwd, spelling]
         self.user_rules_dir = user_rules_dir
         self.warnings: list[str] = []
         self._rule_cache: dict[str, Rule | None] = {}
@@ -94,9 +100,12 @@ class RuleFinder:
     def trigger_rules(self, file_path: str) -> list[Rule]:
         """Rules that load when ``file_path`` is read, in load order.
 
-        ``file_path`` is resolved against the working directory. Files outside
-        it load nothing.
+        A relative ``file_path`` is taken from the working directory. The path,
+        every link it passes through as a file, and its resolved path must all
+        lie inside the working directory; otherwise nothing loads.
         """
+        if "\0" in file_path:
+            return []
         target = os.path.normpath(os.path.join(self.cwd, file_path))
         if not self._is_readable_target(target):
             return []
@@ -133,18 +142,14 @@ class RuleFinder:
     def _nested_dirs(self, target: str) -> list[str]:
         """Directories between the working directory and ``target``, outermost first."""
         parent = os.path.dirname(target)
-        if not parent.startswith(self.cwd):
-            resolved = os.path.realpath(parent)
-            if resolved.startswith(self.cwd):
-                parent = resolved
+        if not _is_within(parent, self.cwd):
+            parent = _strict_realpath(parent)
+        if not _is_within(parent, self.cwd):
+            return []
         directories = []
-        directory = parent
-        while directory not in (self.cwd, os.path.dirname(directory)):
-            # A plain string prefix, as Claude Code checks it: with a working
-            # directory /a/b, a file under /a/bc counts as nested.
-            if directory.startswith(self.cwd):
-                directories.append(directory)
-            directory = os.path.dirname(directory)
+        while parent != self.cwd:
+            directories.append(parent)
+            parent = os.path.dirname(parent)
         directories.reverse()
         return directories
 
@@ -152,10 +157,15 @@ class RuleFinder:
         if self._worktree is None:
             return False
         worktree_root, main_root = self._worktree
-        return _is_within(directory, main_root) and not _is_within(directory, worktree_root)
+        return _is_within_folded(directory, main_root) and not _is_within_folded(
+            directory, worktree_root
+        )
 
     def _is_readable_target(self, target: str) -> bool:
-        return _is_within(target, self.cwd) or _is_within(os.path.realpath(target), self.cwd)
+        return all(
+            any(_is_within(form, directory) for directory in self._working_dirs)
+            for form in _link_forms(target)
+        )
 
     # Walking rules directories -----------------------------------------------
 
@@ -167,7 +177,7 @@ class RuleFinder:
         relative = _relative(base, target)
         if not relative or relative.startswith("..") or os.path.isabs(relative):
             parent = os.path.dirname(target)
-            resolved_parent = os.path.realpath(parent)
+            resolved_parent = _strict_realpath(parent)
             if resolved_parent != parent:
                 relative = _relative(base, os.path.join(resolved_parent, os.path.basename(target)))
         if not relative or relative.startswith("..") or os.path.isabs(relative):
@@ -182,25 +192,30 @@ class RuleFinder:
         *,
         conditional: bool,
         visited: set[str] | None = None,
+        depth: int = 0,
     ) -> list[Rule]:
         """Load the rules under ``rules_dir`` that have globs, or that have none.
 
         Links are followed. For project rules, a rules directory that is itself
         a link must resolve inside the working directory, and so must an entry
-        that resolves somewhere other than its own place in the directory. As
-        in Claude Code, entries are not checked when ``rules_dir`` is reached
-        through a linked parent, such as a linked ``.claude``.
+        that resolves somewhere other than its own place in the directory.
+        These containment checks ignore case, as Claude Code's do.
         """
         visited = set() if visited is None else visited
         if rules_dir in visited:
             return []
+        if depth > MAX_DIRECTORY_DEPTH:
+            self.warnings.append(f"{rules_dir}: nested too deeply; its rules are not loaded")
+            return []
         resolved_dir = os.path.realpath(rules_dir)
-        is_link = os.path.islink(rules_dir)
         visited.add(rules_dir)
-        if is_link:
-            visited.add(resolved_dir)
+        visited.add(resolved_dir)
         include_external = source == USER
-        if not include_external and is_link and not _is_within(resolved_dir, self.cwd):
+        if (
+            not include_external
+            and os.path.islink(rules_dir)
+            and not _is_within_folded(resolved_dir, self.cwd)
+        ):
             return []
         try:
             names = sorted(os.listdir(resolved_dir))
@@ -211,9 +226,11 @@ class RuleFinder:
                 f"{rules_dir}: {error.strerror or error}; its rules are not loaded"
             )
             return []
-        canonical = resolved_dir == rules_dir
         found: list[Rule] = []
         for name in names:
+            if not _is_utf8(name):
+                # Claude Code's runtime cannot open such names and skips them.
+                continue
             entry = os.path.join(rules_dir, name)
             resolved = os.path.realpath(entry)
             try:
@@ -222,12 +239,21 @@ class RuleFinder:
                 if os.path.islink(entry):
                     self.warnings.append(f"{entry}: a link that cannot be followed; skipped")
                 continue
-            points_elsewhere = canonical and resolved != os.path.join(resolved_dir, name)
-            if points_elsewhere and not include_external and not _is_within(resolved, self.cwd):
+            points_elsewhere = resolved != os.path.join(resolved_dir, name)
+            if (
+                points_elsewhere
+                and not include_external
+                and not _is_within_folded(resolved, self.cwd)
+            ):
                 continue
             if stat.S_ISDIR(mode):
                 found += self._walk(
-                    resolved, source, processed, conditional=conditional, visited=visited
+                    resolved,
+                    source,
+                    processed,
+                    conditional=conditional,
+                    visited=visited,
+                    depth=depth + 1,
                 )
             elif stat.S_ISREG(mode) and name.endswith(".md"):
                 rule = self._load(resolved, source, processed)
@@ -281,8 +307,8 @@ class SessionRules:
     """The rule files one session has loaded, so that each loads at most once.
 
     Args:
-        loaded: Resolved paths of files the session already loaded, for example
-            from saved hook state. The set is updated in place.
+        loaded: Paths the session already loaded or read, for example from
+            saved hook state. The set is updated in place.
     """
 
     def __init__(self, loaded: set[str] | None = None) -> None:
@@ -298,12 +324,58 @@ class SessionRules:
         return fresh
 
     def mark_read(self, file_path: str) -> None:
-        """Record that the file at the absolute ``file_path`` was read.
+        """Record that the file at the absolute ``file_path`` was read or written.
 
-        Reading a rule file counts as loading it: its content is already in the
-        conversation, so a later match does not load it again.
+        A rule whose resolved path was read counts as loaded: its content is
+        already in the conversation. The path is recorded as read, not
+        resolved, so reading a rule through a link does not count. Call this
+        before ``take`` for the rules the same read loads, as Claude Code
+        records a read before it loads the rules the read triggers.
         """
-        self.loaded.add(os.path.realpath(file_path))
+        self.loaded.add(os.path.normpath(file_path))
+
+
+def _strict_realpath(path: str) -> str:
+    """``path`` resolved, or unchanged when it cannot be resolved."""
+    try:
+        return os.path.realpath(path, strict=True)
+    except (OSError, ValueError):
+        return path
+
+
+def _link_forms(path: str) -> list[str]:
+    """``path``, each link target it leads to in turn, and its resolved path."""
+    forms = [path]
+    current = path
+    for _ in range(40):
+        try:
+            target = os.readlink(current)
+        except (OSError, ValueError):
+            break
+        current = os.path.normpath(os.path.join(os.path.dirname(current), target))
+        if current in forms:
+            break
+        forms.append(current)
+    resolved = _strict_realpath(path)
+    if resolved not in forms:
+        forms.append(resolved)
+    return forms
+
+
+def _is_utf8(name: str) -> bool:
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _fold(text: str) -> str:
+    return text.lower().replace("\U00000131", "i").replace("\U0000017f", "s")
+
+
+def _is_within_folded(path: str, directory: str) -> bool:
+    return _is_within(_fold(path), _fold(directory))
 
 
 def _is_within(path: str, directory: str) -> bool:
@@ -319,36 +391,53 @@ def _nested_worktree(cwd: str) -> tuple[str, str] | None:
     """Find a git worktree nested inside its own main repository.
 
     Returns (worktree root, main repository root) when ``cwd`` is inside such a
-    worktree, else ``None``.
+    worktree, else ``None``. As Claude Code does, the worktree must be
+    registered in the main repository and point back to itself, and a bare
+    repository's directory is its main root.
     """
     directory = cwd
     while True:
         dot_git = os.path.join(directory, ".git")
-        if os.path.lexists(dot_git):
+        if os.path.isdir(dot_git) or os.path.isfile(dot_git):
             break
         parent = os.path.dirname(directory)
         if parent == directory:
             return None
         directory = parent
-    if not os.path.isfile(dot_git):
+    content = _read_small(dot_git, follow=True)
+    if content is None or not content.strip().startswith("gitdir:"):
         return None
-    try:
-        with open(dot_git, encoding="utf-8") as handle:
-            content = handle.read()
-    except OSError:
+    git_dir = os.path.normpath(os.path.join(directory, content.strip()[len("gitdir:") :].strip()))
+    common_text = _read_small(os.path.join(git_dir, "commondir"), follow=False)
+    back_text = _read_small(os.path.join(git_dir, "gitdir"), follow=False)
+    if common_text is None or back_text is None:
         return None
-    if not content.startswith("gitdir:"):
+    common = os.path.normpath(os.path.join(git_dir, common_text.strip()))
+    if os.path.dirname(git_dir) != os.path.join(common, "worktrees"):
         return None
-    git_dir = os.path.normpath(os.path.join(directory, content[len("gitdir:") :].strip()))
-    try:
-        with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
-            common = os.path.normpath(os.path.join(git_dir, handle.read().strip()))
-    except OSError:
+    back = _strict_realpath(os.path.normpath(os.path.join(git_dir, back_text.strip())))
+    if back != os.path.join(_strict_realpath(directory), ".git"):
         return None
-    if os.path.basename(common) != ".git":
+    if os.path.basename(common) == ".git":
+        main_root = os.path.dirname(common)
+    elif os.path.lexists(os.path.join(common, ".git")):
         return None
-    main_root = os.path.realpath(os.path.dirname(common))
+    else:
+        main_root = common
+    main_root = os.path.realpath(main_root)
     worktree_root = os.path.realpath(directory)
     if main_root == worktree_root or not _is_within(worktree_root, main_root):
         return None
     return worktree_root, main_root
+
+
+def _read_small(path: str, *, follow: bool) -> str | None:
+    """The text of a small regular file, or ``None`` for anything else."""
+    try:
+        mode = (os.stat if follow else os.lstat)(path).st_mode
+        if not stat.S_ISREG(mode):
+            return None
+        with open(path, "rb") as handle:
+            return handle.read(64 * 1024).decode("utf-8")
+    except (OSError, ValueError):
+        return None

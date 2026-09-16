@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -186,13 +187,17 @@ def test_a_session_loads_each_rule_once(tree: Path) -> None:
 
 
 def test_reading_a_rule_file_counts_as_loading_it(tree: Path) -> None:
-    write(tree, {".claude/rules/ts.md": scoped("src/*.ts")})
+    write(tree, {".claude/rules/ts.md": scoped("src/*.ts"), "shared/s.md": scoped("lib/*.ts")})
+    (tree / ".claude/rules/alias.md").symlink_to(tree / "shared/s.md")
     finder = RuleFinder(str(tree), user_rules_dir=None)
     session = SessionRules()
 
     session.mark_read(str(tree / ".claude/rules/ts.md"))
+    session.mark_read(str(tree / ".claude/rules/alias.md"))
 
     assert session.take(finder.trigger_rules("src/a.ts")) == []
+    # A rule read through a link is recorded by the path read, not its target.
+    assert names(session.take(finder.trigger_rules("lib/a.ts")), tree) == ["shared/s.md"]
 
 
 def test_a_session_continues_from_loaded_paths(tree: Path) -> None:
@@ -237,7 +242,7 @@ def test_a_rules_directory_linking_outside_the_working_directory_is_skipped(tree
     assert finder.session_start_rules() == []
 
 
-def test_a_linked_claude_directory_loads_rules_from_outside_the_working_directory(
+def test_a_linked_claude_directory_loads_its_own_rules_but_checks_their_links(
     tree: Path,
 ) -> None:
     write(
@@ -246,16 +251,18 @@ def test_a_linked_claude_directory_loads_rules_from_outside_the_working_director
             "outside/.claude/rules/x.md": UNSCOPED,
             "outside/.claude/rules/y.md": scoped("a.ts"),
             "elsewhere/z.md": UNSCOPED,
+            "proj/shared/in.md": UNSCOPED,
             "proj/a.ts": "",
         },
     )
     (tree / "outside/.claude/rules/z.md").symlink_to(tree / "elsewhere/z.md")
+    (tree / "outside/.claude/rules/w.md").symlink_to(tree / "proj/shared/in.md")
     (tree / "proj/.claude").symlink_to(tree / "outside/.claude")
     finder = RuleFinder(str(tree / "proj"), user_rules_dir=None)
 
     assert names(finder.session_start_rules(), tree) == [
+        "proj/shared/in.md",
         "outside/.claude/rules/x.md",
-        "elsewhere/z.md",
     ]
     assert names(finder.trigger_rules("a.ts"), tree) == ["outside/.claude/rules/y.md"]
 
@@ -291,7 +298,96 @@ def test_a_link_cycle_terminates(tree: Path) -> None:
     assert names(finder.session_start_rules(), tree) == [".claude/rules/a.md"]
 
 
+def test_reads_through_links_must_stay_inside_the_working_directory(tree: Path) -> None:
+    write(
+        tree,
+        {
+            "proj/.claude/rules/src.md": scoped("src/*.ts"),
+            "proj/.claude/rules/ext.md": scoped("ext/*.ts"),
+            "outside/.claude/rules/n.md": UNSCOPED,
+            "outside/a.ts": "",
+            "proj/src/in.ts": "",
+        },
+    )
+    (tree / "proj/ext").symlink_to(tree / "outside")
+    (tree / "proj/src/out.ts").symlink_to(tree / "outside/a.ts")
+    (tree / "alias").symlink_to(tree / "proj")
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None)
+
+    assert finder.trigger_rules("ext/a.ts") == []
+    assert finder.trigger_rules("src/out.ts") == []
+    assert names(finder.trigger_rules("src/in.ts"), tree) == ["proj/.claude/rules/src.md"]
+    assert finder.trigger_rules(str(tree / "alias/src/in.ts")) == []
+    assert finder.trigger_rules("src/in\0.ts") == []
+
+
+def test_the_working_directory_spelling_counts_for_reads(tree: Path) -> None:
+    write(tree, {"proj/.claude/rules/src.md": scoped("src/*.ts"), "proj/src/a.ts": ""})
+    (tree / "alias").symlink_to(tree / "proj")
+    finder = RuleFinder(str(tree / "alias"), user_rules_dir=None)
+
+    assert names(finder.trigger_rules(str(tree / "alias/src/a.ts")), tree) == [
+        "proj/.claude/rules/src.md"
+    ]
+
+
+def test_links_leaving_the_working_directory_are_checked_ignoring_case(tree: Path) -> None:
+    (tree / "probe").mkdir()
+    if (tree / "PROBE").exists():
+        pytest.skip("needs a case-sensitive file system")
+    write(tree, {"proj/shared.md": UNSCOPED, "Proj/.claude/rules/keep.md": UNSCOPED})
+    (tree / "Proj/.claude/rules/l.md").symlink_to(tree / "proj/shared.md")
+    finder = RuleFinder(str(tree / "Proj"), user_rules_dir=None)
+
+    assert names(finder.session_start_rules(), tree) == [
+        "Proj/.claude/rules/keep.md",
+        "proj/shared.md",
+    ]
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="APFS requires UTF-8 names")
+def test_names_that_are_not_utf8_are_skipped(tree: Path) -> None:
+    write(tree, {".claude/rules/ok.md": UNSCOPED})
+    rules = os.fsencode(tree / ".claude/rules")
+    with open(rules + b"/\xff.md", "w") as handle:
+        handle.write(UNSCOPED)
+    os.mkdir(rules + b"/d\xfe")
+    with open(rules + b"/d\xfe/in.md", "w") as handle:
+        handle.write(UNSCOPED)
+    finder = RuleFinder(str(tree), user_rules_dir=None)
+
+    assert names(finder.session_start_rules(), tree) == [".claude/rules/ok.md"]
+
+
+def test_deeply_nested_rules_directories_do_not_raise(tree: Path) -> None:
+    deep = tree / ".claude/rules"
+    for _ in range(300):
+        deep = deep / "d"
+    deep.mkdir(parents=True)
+    (deep / "deep.md").write_text(UNSCOPED)
+    finder = RuleFinder(str(tree), user_rules_dir=None)
+
+    assert finder.session_start_rules() == []
+    assert any("nested too deeply" in warning for warning in finder.warnings)
+
+
 # Worktrees --------------------------------------------------------------------------
+
+
+def test_odd_git_files_do_not_raise_or_block(tree: Path) -> None:
+    write(tree, {".claude/rules/r.md": UNSCOPED})
+    (tree / "w").mkdir()
+    (tree / "w/.git").write_bytes(b"gitdir: \xff\x00")
+    assert names(RuleFinder(str(tree / "w"), None).session_start_rules(), tree) == [
+        ".claude/rules/r.md"
+    ]
+    (tree / "w/.git").write_text(f"gitdir: {tree}/g")
+    (tree / "g").mkdir()
+    os.mkfifo(tree / "g/commondir")
+    (tree / "g/gitdir").write_text(f"{tree}/w/.git")
+    assert names(RuleFinder(str(tree / "w"), None).session_start_rules(), tree) == [
+        ".claude/rules/r.md"
+    ]
 
 
 def git(*args: str, cwd: Path) -> None:
@@ -322,3 +418,34 @@ def test_rule_source_is_project_for_project_directories(tree: Path) -> None:
     write(tree, {".claude/rules/p.md": UNSCOPED})
 
     assert [r.source for r in RuleFinder(str(tree), None).session_start_rules()] == [PROJECT]
+
+
+def test_a_worktree_of_a_bare_repository_skips_the_repository_directory(tree: Path) -> None:
+    write(tree, {".claude/rules/parent.md": UNSCOPED, "src/f": ""})
+    git("init", "-q", cwd=tree / "src")
+    git("add", ".", cwd=tree / "src")
+    git("commit", "-q", "-m", "init", cwd=tree / "src")
+    git("clone", "-q", "--bare", "src", "bare", cwd=tree)
+    git("worktree", "add", "-q", "wt", cwd=tree / "bare")
+    write(tree, {"bare/.claude/rules/b.md": UNSCOPED})
+
+    rules = RuleFinder(str(tree / "bare/wt"), user_rules_dir=None).session_start_rules()
+
+    assert names(rules, tree) == [".claude/rules/parent.md"]
+
+
+def test_a_worktree_that_does_not_point_back_is_not_skipped(tree: Path) -> None:
+    main = tree / "main"
+    write(tree, {"main/.claude/rules/main.md": UNSCOPED, "main/f": ""})
+    git("init", "-q", cwd=main)
+    git("add", ".", cwd=main)
+    git("commit", "-q", "-m", "init", cwd=main)
+    git("worktree", "add", "-q", ".claude/worktrees/w1", cwd=main)
+    (main / ".git/worktrees/w1/gitdir").write_text("/nonexistent/w1/.git\n")
+
+    rules = RuleFinder(str(main / ".claude/worktrees/w1"), user_rules_dir=None)
+
+    assert names(rules.session_start_rules(), tree) == [
+        "main/.claude/rules/main.md",
+        "main/.claude/worktrees/w1/.claude/rules/main.md",
+    ]
