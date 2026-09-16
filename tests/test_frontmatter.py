@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -108,6 +109,49 @@ def test_front_matter_the_yaml_parser_does_not_model_is_read_line_by_line() -> N
 
     assert rule.globs == ("src",)
     assert "read line by line" in rule.warnings[0]
+
+
+BACKSLASH = "\\"
+
+
+def test_surrogate_escapes_form_one_character_only_as_a_pair() -> None:
+    pair = f'---\npaths: "{BACKSLASH}ud83d{BACKSLASH}ude00.md"\n---\nBody'
+    lone = f'---\npaths: "{BACKSLASH}ud83d.md"\n---\nBody'
+
+    assert parse_rule_text(pair).globs == ("\U0001f600.md",)
+    assert parse_rule_text(lone).globs is None
+
+
+@pytest.mark.parametrize(
+    "front_matter",
+    ["paths:\n  \t- a.md", "%YAML 1.2\npaths: a.md", "paths: a.md\rb.md"],
+)
+def test_documents_bun_rejects_even_after_the_retry_leave_the_rule_unconditional(
+    front_matter: str,
+) -> None:
+    rule = parse_rule_text(f"---\n{front_matter}\n---\nBody")
+
+    assert rule.globs is None
+    assert "not valid YAML" in rule.warnings[0]
+
+
+def test_pathological_front_matter_neither_raises_nor_hangs() -> None:
+    started = time.monotonic()
+    deep = "[" * 7000 + "a" + "]" * 7000
+
+    assert parse_rule_text("---" + "\n" * 200_000).globs is None
+    assert parse_rule_text("---\nx:" + " " * 200_000 + "\r\npaths: *.ts\n---\nB").globs == ("*.ts",)
+    assert parse_rule_text("---\nv: " + "1" * 5000 + "\npaths: a.md\n---\nB").globs == ("a.md",)
+    assert parse_rule_text(f"---\npaths: {deep}\n---\nB").warnings
+    assert time.monotonic() - started < 5
+
+
+def test_deeply_nested_lists_are_flattened() -> None:
+    value: object = "a"
+    for _ in range(5000):
+        value = [value]
+
+    assert normalize_globs(value) == ["a"]
 
 
 # Which values scope a rule -----------------------------------------------------

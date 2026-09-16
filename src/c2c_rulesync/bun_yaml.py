@@ -59,7 +59,12 @@ _DOUBLE_QUOTE_ESCAPES = {
     "P": "\U00002029",
 }
 _HEX_ESCAPE_LENGTHS = {"x": 2, "u": 4, "U": 8}
+_MAX_EXACT_DIGITS = 300
+_MAX_PREFIXED_INTEGER = 2**64 - 1
+# A sequence entry or explicit key indicator.
+_BLOCK_INDICATOR = re.compile(r"[-?](?:[ \t]|\Z)")
 _FLOW_INDICATORS = frozenset(",[]{}")
+_LINE_BREAK = re.compile(r"(\r\n|\r|\n)")
 
 
 def resolve_plain(text: str) -> Any:
@@ -71,11 +76,13 @@ def resolve_plain(text: str) -> Any:
     if text in _FALSE:
         return False
     if _DECIMAL.match(text):
-        return int(text)
+        # Only equality with zero matters to callers; a float also avoids
+        # Python's limit on converting long digit strings to int.
+        return int(text) if len(text) <= _MAX_EXACT_DIGITS else float(text)
     if match := _HEX.match(text):
-        return int(match.group(1) + match.group(2), 16)
+        return _prefixed_integer(text, match, 16)
     if match := _OCTAL.match(text):
-        return int(match.group(1) + match.group(2), 8)
+        return _prefixed_integer(text, match, 8)
     if _FLOAT.match(text):
         return float(text)
     if match := _INFINITY.match(text):
@@ -85,6 +92,17 @@ def resolve_plain(text: str) -> Any:
     return text
 
 
+def _prefixed_integer(text: str, match: re.Match[str], base: int) -> int | str:
+    """A hexadecimal or octal integer, which Bun keeps as a string past 64 bits."""
+    digits = match.group(2).lstrip("0") or "0"
+    if len(digits) > 64:
+        return text
+    value = int(digits, base)
+    if value > _MAX_PREFIXED_INTEGER:
+        return text
+    return -value if match.group(1) == "-" else value
+
+
 def parse(text: str) -> Any:
     """Return what ``Bun.YAML.parse(text)`` returns.
 
@@ -92,20 +110,34 @@ def parse(text: str) -> Any:
         YamlError: Bun throws for ``text``.
         UnsupportedYaml: ``text`` uses YAML outside what this module models.
     """
-    return _Parser(text).parse_stream()
+    try:
+        return _Parser(text).parse_stream()
+    except RecursionError:
+        raise UnsupportedYaml("nesting deeper than c2c-rulesync follows") from None
 
 
 class _Parser:
     def __init__(self, text: str) -> None:
-        lines = text.split("\n")
-        self.lines: list[str] = []
-        for line in lines:
-            if line.endswith("\r"):
-                line = line[:-1]
-            if "\r" in line:
-                raise UnsupportedYaml("carriage return inside a line")
-            self.lines.append(line)
+        # Bun breaks lines at a carriage return as well as at a line feed.
+        parts = _LINE_BREAK.split(text)
+        self.lines: list[str] = parts[::2]
+        # Rows whose line break includes a carriage return.
+        self.cr_rows: set[int] = set()
+        for row, line_break in enumerate(parts[1::2]):
+            if "\r" not in line_break:
+                continue
+            self.cr_rows.add(row)
+            line = self.lines[row]
+            if line_break == "\r" and "\t" in line and line.strip(" \t") == "":
+                # Bun's handling of such lines depends on what precedes them.
+                raise UnsupportedYaml("white space with a tab ended by a carriage return")
         self.anchors: dict[str, Any] = {}
+        # Whether the node parsed last ended in something other than plain or
+        # block scalar text: a quote, bracket, alias, comment or empty node.
+        self.closed = False
+        # How many values of mapping keys that are not their mapping's first
+        # are being parsed.
+        self.later_values = 0
 
     # Line helpers -----------------------------------------------------------
 
@@ -118,12 +150,18 @@ class _Parser:
         return stripped == "" or stripped.startswith("#")
 
     def next_content_row(self, row: int) -> int | None:
+        closed = self.closed
         while row < len(self.lines):
             if not self.is_blank(row):
                 self.check_tab_indentation(row)
                 return row
-            if re.match(r"\t+#", self.lines[row]):
+            line = self.lines[row]
+            # Inside the value of a mapping key that is not its mapping's
+            # first, Bun rejects a blank or comment line starting with a tab
+            # after anything but plain or block scalar text.
+            if self.later_values and closed and line.startswith("\t"):
                 raise YamlError("Tab characters cannot be used as indentation")
+            closed = closed or line.lstrip(" \t").startswith("#")
             row += 1
         return None
 
@@ -131,9 +169,9 @@ class _Parser:
         line = self.lines[row]
         spaces = self.indent_of(row)
         if line[spaces : spaces + 1] == "\t":
-            if spaces == 0:
+            if _starts_block_entry(line.lstrip(" \t")):
                 raise YamlError("Tab characters cannot be used as indentation")
-            raise UnsupportedYaml("tab after indentation")
+            raise UnsupportedYaml("tab before a scalar or flow node")
 
     # Stream and documents ---------------------------------------------------
 
@@ -145,6 +183,10 @@ class _Parser:
             if row is None:
                 break
             line = self.lines[row]
+            if line.startswith("%") and not any(
+                later == "---" or later.startswith(("--- ", "---\t")) for later in self.lines[row:]
+            ):
+                raise YamlError("Unexpected token")
             if line.startswith("%") or line == "---" or line.startswith("--- "):
                 raise UnsupportedYaml("directives and document start markers")
             if self._is_document_end(row):
@@ -195,7 +237,10 @@ class _Parser:
             while line[item_column : item_column + 1] in (" ", "\t"):
                 item_column += 1
             rest = line[item_column:]
+            if "\t" in line[column + 1 : item_column] and _starts_block_entry(rest):
+                raise YamlError("Tab characters cannot be used as indentation")
             if rest == "" or rest.startswith("#"):
+                self.closed = True
                 next_row = self.next_content_row(row + 1)
                 if next_row is not None and self.indent_of(next_row) > column:
                     item, row = self.block_node(next_row, column)
@@ -225,9 +270,14 @@ class _Parser:
             if found is None:
                 raise YamlError("Unexpected token")
             key, value_column = found
-            value, row = self.mapping_value(row, value_column, column)
-            mapping[key] = value
-            next_row = self.next_content_row(row)
+            later = int(bool(mapping))
+            self.later_values += later
+            try:
+                value, row = self.mapping_value(row, value_column, column)
+                mapping[key] = value
+                next_row = self.next_content_row(row)
+            finally:
+                self.later_values -= later
             if next_row is None:
                 return mapping, len(self.lines)
             next_indent = self.indent_of(next_row)
@@ -243,6 +293,7 @@ class _Parser:
             column += 1
         rest = line[column:]
         if rest == "" or rest.startswith("#"):
+            self.closed = True
             next_row = self.next_content_row(row + 1)
             if next_row is None:
                 return None, len(self.lines)
@@ -252,7 +303,7 @@ class _Parser:
             if next_indent == mapping_column and self._starts_sequence_entry(next_row, next_indent):
                 return self.block_sequence(next_row, next_indent)
             return None, row + 1
-        return self.inline_node(row, column, mapping_column, allow_key=False)
+        return self.inline_node(row, column, mapping_column, allow_key=False, mapping_value=True)
 
     def _key_at(self, row: int, column: int) -> tuple[str, int] | None:
         """If a mapping key starts at ``column``, return it and the column after its colon."""
@@ -328,21 +379,34 @@ class _Parser:
         *,
         allow_key: bool,
         in_sequence: bool = False,
+        mapping_value: bool = False,
     ) -> tuple[Any, int]:
         line = self.lines[row]
         anchor, tag, column = self._properties(row, column)
         rest = line[column:]
         if (anchor is not None or tag is not None) and (rest == "" or rest.startswith("#")):
+            self.closed = True
             next_row = self.next_content_row(row + 1)
             if next_row is not None and self.indent_of(next_row) > parent_indent:
                 next_line = self.lines[next_row]
                 if tag is not None or next_line[self.indent_of(next_row) :][:1] in ("&", "!"):
                     raise UnsupportedYaml("properties applied to a node on the next line")
                 value, end_row = self.block_node(next_row, parent_indent)
+            elif (
+                mapping_value
+                and next_row is not None
+                and self.indent_of(next_row) == parent_indent
+                and self._starts_sequence_entry(next_row, parent_indent)
+            ):
+                # A block sequence may sit at its key's indentation; Bun then
+                # ignores the tag.
+                value, end_row = self.block_sequence(next_row, parent_indent)
+                return self._finish_node(value, anchor, None, raw=None), end_row
             elif tag == "!!binary":
                 raise UnsupportedYaml(f"empty node with tag {tag}")
             else:
                 value, end_row = _empty_value(tag), row + 1
+                self.closed = True
             return self._finish_node(value, anchor, tag, raw=None), end_row
         if (
             (anchor is not None or tag is not None)
@@ -368,25 +432,29 @@ class _Parser:
             if name not in self.anchors:
                 raise YamlError("Unresolved alias")
             self._expect_line_end(row, end)
+            self.closed = True
             return self.anchors[name], row + 1
         if char in ("|", ">"):
             value, end_row = self.block_scalar(row, column, parent_indent)
+            self.closed = False
             return self._finish_node(value, anchor, tag, raw=None), end_row
         if char in ("[", "{"):
             value, end_row, end_column = self.flow_node(row, column, parent_indent)
             if re.match(r"[ \t]*:(?:[ \t]|$)", self.lines[end_row][end_column:]):
                 raise UnsupportedYaml("flow collection as a mapping key")
             self._expect_line_end(end_row, end_column)
+            self.closed = True
             return self._finish_node(value, anchor, tag, raw=None), end_row + 1
         if char in ('"', "'"):
             value, end_row, end_column = self.quoted_scalar(row, column, parent_indent)
             self._expect_line_end(end_row, end_column, strict_comment=True)
+            self.closed = True
             return self._finish_node(value, anchor, tag, raw=None), end_row + 1
         if char == "-" and rest[1:2] in ("", " ", "\t"):
             if in_sequence:
                 return self.block_sequence(row, column)
             raise YamlError("Unexpected token")
-        if char in ("@", "`", "%"):
+        if char in ("@", "`", "%", "]", "}"):
             raise YamlError("Unexpected token")
         if char == "?" and rest[1:2] in ("", " ", "\t"):
             if not in_sequence:
@@ -461,6 +529,7 @@ class _Parser:
         first, ends_in_comment = self._plain_line(self.lines[row][column:])
         parts = [first]
         row += 1
+        self.closed = ends_in_comment
         if ends_in_comment:
             return first, row
         breaks = 0
@@ -476,14 +545,13 @@ class _Parser:
                 break
             if stripped.startswith("#"):
                 break
-            if line[indent : indent + 1] == "\t" and indent == 0:
-                raise YamlError("Tab characters cannot be used as indentation")
             text, ends_in_comment = self._plain_line(stripped)
             parts.append("\n" * breaks if breaks else " ")
             parts.append(text)
             breaks = 0
             row += 1
             if ends_in_comment:
+                self.closed = True
                 break
         return "".join(parts), row
 
@@ -508,6 +576,7 @@ class _Parser:
         # a space.
         segments: list[tuple[str, bool]] = []
         current: list[str] = []
+        crosses_carriage_return = False
         while True:
             line = self.lines[row]
             escaped_break = False
@@ -518,6 +587,9 @@ class _Parser:
                     index += 2
                     continue
                 if char == quote:
+                    if crosses_carriage_return:
+                        # Bun folds such breaks differently; errors still match.
+                        raise UnsupportedYaml("quoted scalar broken across carriage returns")
                     segments.append(("".join(current), False))
                     return _fold_quoted(segments), row, index + 1
                 if char == "\\" and quote == '"':
@@ -533,6 +605,7 @@ class _Parser:
                 index += 1
             segments.append(("".join(current), escaped_break))
             current = []
+            crosses_carriage_return = crosses_carriage_return or row in self.cr_rows
             row += 1
             if row >= len(self.lines):
                 raise YamlError("Unexpected EOF")
@@ -569,6 +642,12 @@ class _Parser:
                 )
                 row += 1
                 continue
+            if line.startswith("\t") and lines and lines[-1] == "":
+                raise UnsupportedYaml("tab line after a blank line in a block scalar")
+            if line.startswith("\t") and (content_indent is None or content_indent > 0):
+                if content_indent is not None and line.lstrip("\t ").startswith("#"):
+                    break
+                raise YamlError("Tab characters cannot be used as indentation")
             if content_indent is None:
                 if spaces <= parent_indent and line[spaces : spaces + 1] == "\t":
                     if line.strip(" \t").startswith("#"):
@@ -687,7 +766,22 @@ def _double_quote_escape(line: str, index: int) -> tuple[str, int]:
     if length is not None:
         digits = line[index + 2 : index + 2 + length]
         if len(digits) == length and all(c in "0123456789abcdefABCDEF" for c in digits):
-            return chr(int(digits, 16)), 2 + length
+            code = int(digits, 16)
+            if not 0xD800 <= code <= 0xDFFF:
+                return chr(code), 2 + length
+            # Only a \u escape of a high surrogate directly followed by a \u
+            # escape of a low surrogate forms a character.
+            low = line[index + 8 : index + 12]
+            if (
+                escape == "u"
+                and code <= 0xDBFF
+                and line[index + 6 : index + 8] == "\\u"
+                and len(low) == 4
+                and all(c in "0123456789abcdefABCDEF" for c in low)
+                and 0xDC00 <= int(low, 16) <= 0xDFFF
+            ):
+                pair = 0x10000 + ((code - 0xD800) << 10) + (int(low, 16) - 0xDC00)
+                return chr(pair), 12
     raise YamlError("Unexpected character")
 
 
@@ -959,3 +1053,37 @@ def _js_key(key: Any) -> str:
             return str(int(key))
         raise UnsupportedYaml("non-integer number as a key")
     return str(key)
+
+
+def _starts_block_entry(rest: str) -> bool:
+    """Whether ``rest``, a line after its indentation, starts a block entry or key."""
+    if _BLOCK_INDICATOR.match(rest):
+        return True
+    if rest[:1] in ("&", "!"):
+        # Properties before a key.
+        parts = rest.split(None, 1)
+        rest = parts[1] if len(parts) > 1 else ""
+    if rest[:1] in ("'", '"'):
+        quote = rest[0]
+        index = 1
+        while index < len(rest):
+            escaped = rest[index] == "\\" and quote == '"'
+            doubled = rest[index] == quote == "'" and rest[index + 1 : index + 2] == "'"
+            if escaped or doubled:
+                index += 2
+            elif rest[index] == quote:
+                break
+            else:
+                index += 1
+        return re.match(r"[ \t]*:(?:[ \t]|\Z)", rest[index + 1 :]) is not None
+    depth = 0
+    for position, char in enumerate(rest):
+        if char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth -= 1
+        elif char == "#" and (position == 0 or rest[position - 1] in " \t"):
+            return False
+        elif char == ":" and depth <= 0 and rest[position + 1 : position + 2] in ("", " ", "\t"):
+            return True
+    return False

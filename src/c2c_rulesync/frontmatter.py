@@ -29,12 +29,8 @@ _JS_WHITESPACE_CLASS = "[" + re.escape(_JS_WHITESPACE) + "]"
 # Front matter opens with `---` at the very start and closes at the first
 # later `---`, even one in the middle of a line.
 _FRONT_MATTER = re.compile(rf"---{_JS_WHITESPACE_CLASS}*\n([\s\S]*?)---{_JS_WHITESPACE_CLASS}*\n?")
-# A top-level `key: value` line whose value Claude Code quotes when the first
-# parse fails. JavaScript's `.` stops at line terminators, so a line ending in
-# `\r` never matches.
-_REWRITABLE_LINE = re.compile(
-    rf"([a-zA-Z_-]+):{_JS_WHITESPACE_CLASS}+([^\n\r\U00002028\U00002029]+)\Z"
-)
+_REWRITABLE_KEY = re.compile(r"[a-zA-Z_-]+:")
+_LINE_TERMINATORS = frozenset("\n\r\U00002028\U00002029")
 _NEEDS_QUOTES = re.compile(r"[{}\[\]*&#!|>%@`]|: ")
 _LEADING_TABS = re.compile("(?:^|(?<=[\n\r\U00002028\U00002029]))\t+")
 _BRACE_GROUP = re.compile(r"([^{]*)\{([^}]+)\}([^\n\r\U00002028\U00002029]*)\Z")
@@ -66,7 +62,9 @@ def parse_rule_text(text: str) -> RuleText:
     """Split a rule file into its injected body and its globs."""
     warnings: list[str] = []
     stripped = text[1:] if text.startswith("\U0000feff") else text
-    match = _FRONT_MATTER.match(stripped)
+    # Without a later `---` the pattern cannot match, and trying it on a long
+    # run of line breaks takes quadratic time.
+    match = _FRONT_MATTER.match(stripped) if stripped.find("---", 3) > 0 else None
     if match is None:
         front_matter: dict[str, Any] = {}
         body = text
@@ -108,11 +106,11 @@ def _quote_special_values(text: str) -> str:
     """Quote top-level values containing YAML indicators, as Claude Code's retry does."""
     lines = []
     for line in text.split("\n"):
-        match = _REWRITABLE_LINE.match(line)
-        if match is None:
+        split = _rewritable_line(line)
+        if split is None:
             lines.append(line)
             continue
-        key, value = match.group(1), match.group(2)
+        key, value = split
         if (value.startswith('"') and value.endswith('"')) or (
             value.startswith("'") and value.endswith("'")
         ):
@@ -127,6 +125,30 @@ def _quote_special_values(text: str) -> str:
             continue
         lines.append(line)
     return "\n".join(lines)
+
+
+def _rewritable_line(line: str) -> tuple[str, str] | None:
+    """Split a top-level ``key: value`` line the retry may rewrite.
+
+    The line must be a key of letters, ``_`` and ``-``, a colon, white space
+    and a value. White space before the value may include line terminators,
+    but the value may not: JavaScript's ``.`` does not match them, so a line
+    ending in ``\r`` is never rewritten. The value starts at its first
+    non-white-space character.
+    """
+    match = _REWRITABLE_KEY.match(line)
+    if match is None:
+        return None
+    rest = line[match.end() :]
+    start = len(rest) - len(rest.lstrip(_JS_WHITESPACE))
+    if start == 0 or start == len(rest):
+        # No white space after the colon, or nothing but white space, which
+        # never needs quoting.
+        return None
+    value = rest[start:]
+    if any(char in _LINE_TERMINATORS for char in value):
+        return None
+    return match.group()[:-1], value
 
 
 def _parses_as_list(value: str) -> bool:
@@ -201,10 +223,19 @@ def normalize_globs(paths: Any, warnings: list[str] | None = None) -> list[str]:
 
 
 def _normalize(value: Any, budget: list[int], warnings: list[str]) -> list[str]:
-    if isinstance(value, list):
-        return [glob for item in value for glob in _normalize(item, budget, warnings)]
-    if not isinstance(value, str):
-        return []
+    strings: list[str] = []
+    # Aliases can nest lists deeper than Python's recursion limit.
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, list):
+            pending.extend(reversed(item))
+        elif isinstance(item, str):
+            strings.append(item)
+    return [glob for string in strings for glob in _normalize_string(string, budget, warnings)]
+
+
+def _normalize_string(value: str, budget: list[int], warnings: list[str]) -> list[str]:
     items: list[str] = []
     current: list[str] = []
     depth = 0

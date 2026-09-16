@@ -119,12 +119,26 @@ Bun departs from YAML 1.2 in ways that matter for rules (vector-verified):
 - `paths: {a,b}.ts` is a flow mapping followed by text, and fails.
 - A value containing `: `, such as `description: Rules for: the API`, fails.
 - `012` is the number 12, `0X1F` and `1_000` are strings, and `yes`, `no` and
-  `on` are strings.
-- Tabs used as indentation fail.
+  `on` are strings. A hexadecimal or octal number above 64 bits is a string,
+  and a decimal one too large for a double is infinity.
+- Tabs used as indentation fail, and so does a tab between indentation and a
+  list item or key, as in `paths:\n  \t- a.md`. A blank or comment line
+  starting with a tab also fails in the value of a mapping key that is not the
+  mapping's first, unless the text before it is a plain or block scalar: after
+  `description: d` and `paths: "a"`, a line holding only a tab fails. Claude
+  Code's retry replaces those tabs, so such front matter usually still applies.
+- A lone carriage return breaks lines, so `paths: a.md\rb.md` fails.
+- A directive such as `%YAML 1.2` fails, because front matter cannot hold the
+  `---` that would follow it.
+- `\u` escapes of a surrogate pair form one character; any other surrogate
+  escape fails.
+- A plain value cannot start with `]` or `}`.
 
 The parser answers in one of three ways: a value, "Bun throws", or "not
-modeled" for constructs such as explicit `?` keys and directives. The caller
-treats "not modeled" separately and warns instead of guessing.
+modeled" for constructs such as explicit `?` keys, nesting deeper than Python's
+recursion limit, and quoted scalars broken across lines ending in carriage
+returns. The caller treats "not modeled" separately and warns instead of
+guessing.
 
 `tests/vectors/bun_yaml.json` holds Bun's answers for about 3,500 documents:
 
@@ -133,8 +147,10 @@ treats "not modeled" separately and warns instead of guessing.
 - a seeded corpus of mostly malformed documents held out from calibration.
 
 The parser gives no wrong answer on any of them and declines about 2% as not
-modeled. Nine further held-out corpora of 4,000 documents each, generated with
-other seeds, also produced no wrong answer. Claude Code 2.1.273 embeds Bun
+modeled. Documents generated outside the repository also produced no wrong
+answer: eleven held-out corpora of 4,000 documents each, and 80,000 documents
+derived from all of these by inserting tabs, carriage returns, directives,
+surrogate escapes and large numbers (between 6% and 15% declined). Claude Code 2.1.273 embeds Bun
 1.4.3, which is unpublished; the vectors come from Bun 1.4.2.
 
 ```bash
