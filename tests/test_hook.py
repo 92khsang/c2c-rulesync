@@ -342,6 +342,8 @@ def run_cli(codex: Codex, payload: dict[str, Any]) -> subprocess.Popen[bytes]:
     assert process.stdin is not None
     process.stdin.write(json.dumps(payload).encode())
     process.stdin.close()
+    # communicate() on Python 3.11 flushes stdin even when it is closed.
+    process.stdin = None
     return process
 
 
