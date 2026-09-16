@@ -16,6 +16,43 @@ Each behavior is labeled with how it is known:
 | observed | Observed in the installed Claude Code without an end-to-end confirmation. |
 | oracle-confirmed | Recorded from a real Claude Code session through the `InstructionsLoaded` hook, committed under `tests/parity/`. |
 
+## Parsing front matter YAML
+
+Claude Code parses a rule's front matter with `Bun.YAML.parse` (observed), and
+whether that parse succeeds decides whether the rule is path-scoped.
+`src/c2c_rulesync/bun_yaml.py` predicts Bun's result for the YAML front matter
+contains: block and flow collections, plain, quoted and block scalars, anchors,
+aliases, tags and comments.
+
+Bun departs from YAML 1.2 in ways that matter for rules (vector-verified):
+
+- An unquoted value starting with `*`, such as `paths: *.ts` or the list item
+  `- **/*.ts`, is an alias to an undefined anchor, so the whole document fails.
+- `paths: {a,b}.ts` is a flow mapping followed by text, and fails.
+- A value containing `: `, such as `description: Rules for: the API`, fails.
+- `012` is the number 12, `0X1F` and `1_000` are strings, and `yes`, `no` and
+  `on` are strings.
+- Tabs used as indentation fail.
+
+The parser answers in one of three ways: a value, "Bun throws", or "not
+modeled" for constructs such as explicit `?` keys and directives. The caller
+treats "not modeled" separately and warns instead of guessing.
+
+`tests/vectors/bun_yaml.json` holds Bun's answers for about 3,500 documents:
+
+- hand-picked edge cases;
+- combinations of keys, values and layouts rule files use;
+- a seeded corpus of mostly malformed documents held out from calibration.
+
+The parser gives no wrong answer on any of them and declines about 2% as not
+modeled. Nine further held-out corpora of 4,000 documents each, generated with
+other seeds, also produced no wrong answer. Claude Code 2.1.273 embeds Bun
+1.4.3, which is unpublished; the vectors come from Bun 1.4.2.
+
+```bash
+bun scripts/gen_yaml_vectors.mjs tests/vectors/bun_yaml.json
+```
+
 ## Matching `paths:` globs
 
 ### Engine
