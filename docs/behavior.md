@@ -264,8 +264,8 @@ Limits of the Codex events:
 - The session start rules are those of the working directory when a thread
   first receives them; rules without `paths:` of a directory the session
   changes to later are not delivered.
-- A file edited by `apply_patch` without a prior read loads its rules as the
-  edit is applied, not before it is written.
+- A file edited by `apply_patch` without a prior read loads its rules just
+  before the patch applies, after the model has already written the patch.
 
 ### Output
 
