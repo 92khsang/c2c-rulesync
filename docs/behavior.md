@@ -16,6 +16,94 @@ Each behavior is labeled with how it is known:
 | observed | Observed in the installed Claude Code without an end-to-end confirmation. |
 | oracle-confirmed | Recorded from a real Claude Code session through the `InstructionsLoaded` hook, committed under `tests/parity/`. |
 
+## Reading a rule file
+
+`src/c2c_rulesync/frontmatter.py` turns a rule file into an injected body and a
+list of globs, or no globs for a rule that applies unconditionally. Each step
+reproduces Claude Code 2.1.273 (observed); the oracle-confirmed cases are
+listed in `tests/parity/`.
+
+### Front matter
+
+- A leading byte order mark is ignored.
+- Front matter must start at the very first character with `---` followed by
+  white space up to a line break, so `----` does not open it.
+- It closes at the first later `---`, even in the middle of a line:
+  `paths: "x---y"` ends the front matter after `"x`.
+- Without a closing `---` there is no front matter, and the whole file,
+  including its first line, is the body of an unconditional rule.
+
+### YAML and the retry
+
+The front matter is parsed as YAML (see [Parsing front matter YAML](#parsing-front-matter-yaml)).
+If Bun rejects it, Claude Code retries once after two rewrites:
+
+1. Every line of the form `key: value`, whose key uses only letters, `_` and
+   `-`, gets its value double-quoted, escaping `\` and `"`, when the value
+   contains any of `{ } [ ] * & # ! | > % @` or a backtick, or contains `: `.
+   A value already wrapped in matching quotes, or written `[...]` and parsing
+   as a list, is left alone.
+2. Every run of tabs at the start of a line becomes two spaces per tab.
+
+Consequences worth knowing:
+
+- `paths: *.ts` works, because the retry quotes it.
+- A list item `- **/*.ts` is never rewritten, so the retry fails too, and the
+  rule loads for every file. Quote globs that start with `*`.
+- `paths: [**/*.ts]` becomes the single literal glob `[**/*.ts]`, a character
+  class.
+- The retry quotes a whole value, comments included, so once any line forces
+  a retry, `paths: a.md # note` becomes the glob `a.md # note`.
+- A line ending in a carriage return (CRLF files) is never rewritten.
+
+If the retry fails, the front matter is ignored: the rule loads for every file.
+c2c-rulesync does the same and reports a warning. If the YAML uses constructs
+c2c-rulesync does not model, it reads `paths` line by line and warns that the
+result may differ from Claude Code.
+
+### From `paths` to globs
+
+- Only the `paths` key counts; `globs` or `Paths` are ignored.
+- A missing or falsy value (`null`, `""`, `0`, `false`) leaves the rule
+  unconditional. So does a value yielding no glob, such as `[]`, `123` or a
+  mapping.
+- A list is flattened, nested lists included, and non-string items are
+  skipped.
+- Each string is split on commas outside braces, so `paths: src/**, docs/**`
+  gives two globs. The brace depth can go negative, and a stray `}` then
+  disables splitting for the rest of the string.
+- Each piece is trimmed and brace-expanded left to right: `{a,b}{1,2}` gives
+  `a1 a2 b1 b2`, `x{,.bak}` gives `x x.bak`, and `{x}` gives `x`. A rule's
+  expansions share a budget of 1,000 results and 4 MiB; a piece that would
+  exceed it stays unexpanded.
+- One trailing `/**` is removed from each glob, so `src/**` becomes `src`,
+  which matches a directory named `src` at any depth (see
+  [Matching](#matching-paths-globs)).
+- If no glob remains, or every glob is `**`, the rule is unconditional.
+
+### Body
+
+When the body contains `<!--`, block-level HTML comments are removed as marked
+15-17 tokenizes them (Claude Code uses a marked release in that range, observed
+from its HTML tokenizer). The body's line endings become `\n`, and:
+
+- A comment starting a block (up to three spaces of indentation, outside code,
+  lists, block quotes and other HTML blocks) is removed, along with the rest of
+  its last line if that is blank, and the line breaks after it.
+- A comment inside a paragraph line, a list item, a block quote or code stays.
+- An unclosed comment stays.
+
+`src/c2c_rulesync/markdown_blocks.py` approximates marked's block structure
+rather than porting marked. `tests/vectors/marked_comments.json` holds marked
+17.0.6's output for 31 curated bodies and 3,000 random ones: the curated bodies
+all match, and 2 random bodies differ. Both combine a stray `</script>` line, a
+comment and a setext underline.
+
+```bash
+npm install --prefix /tmp/marked-17 marked@17.0.6
+node scripts/gen_comment_vectors.mjs /tmp/marked-17/node_modules/marked tests/vectors/marked_comments.json
+```
+
 ## Parsing front matter YAML
 
 Claude Code parses a rule's front matter with `Bun.YAML.parse` (observed), and
