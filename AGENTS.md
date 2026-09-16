@@ -28,6 +28,7 @@ uv run ruff check && uv run ruff format --check
 uv run mypy
 node scripts/gen_ignore_vectors.mjs tests/vectors/node_ignore_7_0_5.json   # network
 bun scripts/gen_js_case_classes.mjs src/c2c_rulesync/_js_case.py         # Bun runtime
+bun scripts/gen_yaml_vectors.mjs tests/vectors/bun_yaml.json               # Bun runtime
 ```
 
 ## Contributing
