@@ -14,7 +14,8 @@ under the same conditions Claude Code 2.1.273 loads them.
 [docs/behavior.md](docs/behavior.md) specifies what loads when, and every known
 difference from Claude Code.
 
-> **Status:** under development; no release has been tagged yet.
+> **Status:** 0.1.0, the first release. Checked against Claude Code 2.1.273
+> and Codex CLI 0.154.0.
 
 ## Requirements
 
