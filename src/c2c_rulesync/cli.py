@@ -14,6 +14,7 @@ import fcntl
 import os
 import signal
 import sys
+from collections.abc import Callable
 from types import FrameType
 from typing import NoReturn
 
@@ -62,10 +63,13 @@ def run_hook_mode() -> NoReturn:
             _arm_deadline()
             hook_stdout = _isolate_stdout()
             payload = sys.stdin.buffer.read()
-            output = handle_payload(payload)
-            _disarm_deadline()
-            if output is not None:
+
+            def emit(output: bytes) -> None:
+                # Output that has started must not be cut short by the deadline.
+                _disarm_deadline()
                 _write_fully(hook_stdout, output)
+
+            handle_payload(payload, emit)
         except BaseException as error:  # the hook must fail open on everything
             _report(error)
         finally:
@@ -79,10 +83,11 @@ def run_hook_mode() -> NoReturn:
         os._exit(0)
 
 
-def handle_payload(payload: bytes) -> bytes | None:
-    """Turn a raw hook payload into the bytes to print, or ``None`` for no output."""
-    del payload
-    return None
+def handle_payload(payload: bytes, emit: Callable[[bytes], None]) -> None:
+    """Handle a raw hook payload, passing the one JSON object to print, if any, to ``emit``."""
+    from c2c_rulesync.hook import run_hook
+
+    run_hook(payload, emit)
 
 
 def _isolate_stdout() -> int:

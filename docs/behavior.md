@@ -206,6 +206,47 @@ Codex runs a command in its tool call's `workdir` when one is given, but does
 not pass `workdir` to hooks, so relative paths resolve against the session's
 working directory.
 
+## Delivering rules in Codex
+
+`src/c2c_rulesync/hook.py` handles the Codex events wired in the README
+(Codex 0.145.0 or later; behavior checked against the Codex 0.154.0 source and
+hook schemas, vendored under `tests/vectors/codex-0.154.0/`).
+
+| Event | What c2c-rulesync does |
+|---|---|
+| `SessionStart` with source `startup` or `clear` | Injects the session start rules. |
+| `SessionStart` with source `compact` | Forgets what the thread received, then injects the session start rules. |
+| `SessionStart` with source `resume` | Nothing: the resumed conversation still holds what it received. |
+| `SubagentStart` | Injects the session start rules into the subagent. |
+| `PreToolUse` | Injects the rules the tool call's files load, and any session start rules the thread has not received. |
+| `PostCompact` | Forgets what the thread received; prints nothing. |
+
+### Once per thread
+
+Like Claude Code, each thread of a session receives a rule file once until
+its conversation is compacted. c2c-rulesync records what each thread received
+under the state directory (see the README), per session id and thread:
+
+- a subagent spawned by a tool is its own thread, named by its `agent_id`;
+- another internal thread, such as a review, is told apart by the thread id in
+  its transcript file name (inferred from the Codex source, not observed);
+- everything else belongs to the main thread.
+
+Hook processes of one thread run one at a time under a file lock, and output
+is written only after the new record is staged. A failure between output and
+record can make a rule arrive twice, never not at all. When no record can be
+kept, `SessionStart` and `SubagentStart` still inject and `PreToolUse` injects
+nothing. Records of sessions untouched for a week are removed.
+
+### Output
+
+Rules reach the model as one `<rule path="...">` element each, joined by blank
+lines, in load order. The path is relative to the working directory when inside
+it, otherwise under `~` when possible. A `</rule>` inside a rule is written
+`<\/rule>`. The user-facing hook message lists the rules loaded and each
+warning once per thread. Output is ASCII-only JSON with only the keys Codex
+accepts for the event.
+
 ## Recorded Claude Code sessions
 
 `tests/parity/` holds what real Claude Code 2.1.273 sessions loaded, and
