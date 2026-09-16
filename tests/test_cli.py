@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -64,3 +65,69 @@ def test_hook_mode_ignores_extra_arguments() -> None:
 
     assert result.returncode == 0
     assert result.stdout == b""
+
+
+def run_hook_with_handler(
+    handler_source: str, *, shell_redirect: str = ""
+) -> subprocess.CompletedProcess[bytes]:
+    """Run hook mode in a child whose ``handle_payload`` is replaced by ``handler_source``."""
+    script = (
+        "import time\n"
+        "from c2c_rulesync import cli\n"
+        f"{handler_source}\n"
+        "cli.handle_payload = handle_payload\n"
+        "cli.run_hook_mode()\n"
+    )
+    command = f'"{sys.executable}" -c "$SCRIPT" {shell_redirect}'
+    return subprocess.run(
+        ["/bin/sh", "-c", command],
+        input=b"{}",
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env={**os.environ, "SCRIPT": script},
+    )
+
+
+def test_hook_mode_keeps_stray_prints_off_stdout() -> None:
+    result = run_hook_with_handler(
+        "def handle_payload(payload):\n    print('stray diagnostic')\n    return b'{\"ok\":true}'\n"
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == b'{"ok":true}'
+    assert b"stray diagnostic" in result.stderr
+
+
+def test_hook_mode_keeps_stray_prints_off_stdout_when_stderr_is_closed() -> None:
+    result = run_hook_with_handler(
+        "def handle_payload(payload):\n"
+        "    print('stray diagnostic')\n"
+        "    return b'{\"ok\":true}'\n",
+        shell_redirect="2>&-",
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == b'{"ok":true}'
+
+
+def test_hook_mode_exits_0_when_stdout_is_closed() -> None:
+    result = run_hook_with_handler(
+        "def handle_payload(payload):\n    return b'{}'\n",
+        shell_redirect=">&-",
+    )
+
+    assert result.returncode == 0
+
+
+def test_hook_mode_exits_0_without_output_past_the_deadline() -> None:
+    result = run_hook_with_handler(
+        "cli.HOOK_DEADLINE_SECONDS = 0.05\n"
+        "def handle_payload(payload):\n"
+        "    time.sleep(5)\n"
+        "    return b'{\"late\":true}'\n"
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == b""
+    assert b"HookDeadlineExceeded" in result.stderr

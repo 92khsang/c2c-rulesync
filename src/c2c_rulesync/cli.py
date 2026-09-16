@@ -10,6 +10,7 @@ hook as a request to block the tool call.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import signal
 import sys
@@ -56,19 +57,25 @@ def main(argv: list[str] | None = None) -> int:
 
 def run_hook_mode() -> NoReturn:
     """Run one hook invocation and terminate the process with status 0."""
-    hook_stdout = _isolate_stdout()
     try:
-        _arm_deadline()
-        payload = sys.stdin.buffer.read()
-        output = handle_payload(payload)
-        _disarm_deadline()
-        if output is not None:
-            _write_fully(hook_stdout, output)
-    except BaseException as error:  # the hook must fail open on everything
-        _report(error)
+        try:
+            _arm_deadline()
+            hook_stdout = _isolate_stdout()
+            payload = sys.stdin.buffer.read()
+            output = handle_payload(payload)
+            _disarm_deadline()
+            if output is not None:
+                _write_fully(hook_stdout, output)
+        except BaseException as error:  # the hook must fail open on everything
+            _report(error)
+        finally:
+            _disarm_deadline()
+            _flush_quietly()
+    except BaseException:
+        # The one-shot deadline can still fire while the block above unwinds;
+        # once it has fired or been disarmed, nothing else can interrupt this.
+        pass
     finally:
-        _disarm_deadline()
-        _flush_quietly()
         os._exit(0)
 
 
@@ -79,14 +86,25 @@ def handle_payload(payload: bytes) -> bytes | None:
 
 
 def _isolate_stdout() -> int:
-    """Keep a private handle on stdout and send every other stdout write to stderr.
+    """Keep a private handle on stdout and send every other stdout write elsewhere.
 
     Codex parses the whole of stdout as one JSON object, and on ``SessionStart``
     it treats plain text as model context, so nothing but the hook output may
-    reach the real stdout.
+    reach the real stdout. Stray writes go to stderr, or to the null device when
+    stderr is closed.
+
+    Raises:
+        OSError: stdout is not open.
     """
-    private = os.dup(1)
-    os.dup2(2, 1)
+    private = fcntl.fcntl(1, fcntl.F_DUPFD_CLOEXEC, 3)
+    try:
+        os.fstat(2)
+    except OSError:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 1)
+        os.close(devnull)
+    else:
+        os.dup2(2, 1)
     return private
 
 
