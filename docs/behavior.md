@@ -87,6 +87,20 @@ are generated with Bun 1.4.2, the newest public release. Node.js 24 and Bun
 1.4.2 produce identical results for every vector in
 `tests/vectors/node_ignore_7_0_5.json`.
 
+### Known differences from Claude Code
+
+A differential run of 6.5 million pattern and path pairs against node-ignore
+7.0.5 under Bun found only these differences, all in globs no one writes:
+
+- A glob nesting escaped parentheses more than 100 levels deep is treated as
+  invalid; JavaScript accepts it.
+- Bun rejects some globs whose brace quantifier asks for billions of
+  repetitions ("pattern exceeds string length limits"); the port accepts them.
+  Such a glob cannot match a real path either way.
+- A backreference created through escaped parentheses compares
+  case-insensitively with Python's folding, which differs from Bun for a few
+  characters such as `k`.
+
 ### Paths
 
 Paths are matched as relative POSIX paths. node-ignore rejects empty paths,

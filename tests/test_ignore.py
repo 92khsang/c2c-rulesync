@@ -105,3 +105,12 @@ def test_every_javascript_case_class_matches_within_itself_only() -> None:
             mismatches.append(f"{members[0]!r} should not match {outsider!r}")
 
     assert not mismatches, _mismatch_report(mismatches)
+
+
+def test_deeply_nested_groups_are_dropped_without_raising() -> None:
+    # JavaScript accepts thousands of nested groups; Python's re cannot, so
+    # the port treats such a glob as invalid. No realistic glob nests this deep.
+    pattern = "\\\\(" * 300 + "a" + "\\\\)" * 300
+
+    assert is_valid_pattern(pattern) is False
+    assert matches([pattern, "*.md"], "a.md") is True

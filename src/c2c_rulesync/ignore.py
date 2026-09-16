@@ -199,31 +199,49 @@ _LOOKAROUND = 2
 _QUANTIFIED = 3
 _LAZY = 4
 
+_BRACE_QUANTIFIER = re.compile(r"\{([0-9]+)(?:(,)([0-9]*))?\}")
+# JavaScriptCore rejects a minimum repetition count this large.
+_JS_MAX_REPEAT_MINIMUM = 2**64 - 1
+# Python's re cannot express larger counts; no path is long enough to tell.
+_PYTHON_MAX_REPEAT = 2**32 - 2
+# Python's re and this translator are recursive, so deeply nested groups are
+# refused instead of risking RecursionError. JavaScript accepts them; no
+# realistic glob nests this deep.
+_MAX_GROUP_DEPTH = 100
+
 
 class _ClassAtom:
-    __slots__ = ("char", "is_hyphen", "text")
+    __slots__ = ("char", "complement", "text")
 
-    def __init__(self, text: str, char: str | None, *, is_hyphen: bool = False) -> None:
+    def __init__(self, text: str, char: str | None, *, complement: bool = False) -> None:
+        # Python class member text, or for a complement the characters excluded.
         self.text = text
         # The single character the atom denotes, or None for a class escape.
         self.char = char
-        # A literal, unescaped hyphen, which may form a range.
-        self.is_hyphen = is_hyphen
+        # Whether this is \D, \W or \S, which cannot nest in a Python class.
+        self.complement = complement
 
 
 class _Translator:
     """Translate the JavaScript regular expressions node-ignore produces.
 
     The input holds the constructs node-ignore emits plus whatever a pattern's
-    backslash escapes leave behind: groups, anchors, alternation, quantifiers,
-    `.`, character classes and escapes. Anything JavaScript would reject, such
-    as an unmatched parenthesis or a quantifier with nothing to repeat, raises
-    InvalidPatternError.
+    backslash escapes leave behind, which can include quantifiers in braces,
+    capturing groups and backreferences. The source is parsed with the Annex B
+    grammar JavaScript uses without the ``u`` flag. Anything JavaScript would
+    reject, such as an unmatched parenthesis or a quantifier with nothing to
+    repeat, raises InvalidPatternError.
     """
 
     def __init__(self, source: str) -> None:
         self._source = source
         self._index = 0
+        self._group_total, depth = _count_capturing_groups(source)
+        if depth > _MAX_GROUP_DEPTH:
+            raise InvalidPatternError("groups nested too deeply to translate")
+        self._next_group = 1
+        self._open_groups: set[int] = set()
+        self._closed_groups: set[int] = set()
 
     def translate(self) -> str:
         translated = self._disjunction()
@@ -244,23 +262,24 @@ class _Translator:
 
     def _alternative(self) -> str:
         terms: list[str] = []
-        # What the last term is, which decides whether a quantifier may follow.
         last: int | None = None
         while self._index < len(self._source) and self._peek() not in ("|", ")"):
             char = self._peek()
-            if char not in ("*", "+", "?"):
+            if char in ("*", "+", "?"):
+                self._index += 1
+                quantifier = char
+            elif char == "{" and (braces := _BRACE_QUANTIFIER.match(self._source, self._index)):
+                self._index = braces.end()
+                quantifier = _python_braces(braces)
+            else:
                 text, last = self._term()
                 terms.append(text)
                 continue
-            self._index += 1
-            if char == "?" and last is _QUANTIFIED:
+            if quantifier == "?" and last == _QUANTIFIED:
                 terms[-1] += "?"
                 last = _LAZY
-            elif last is _ATOM:
-                terms[-1] += char
-                last = _QUANTIFIED
-            elif last is _LOOKAROUND:
-                terms[-1] = f"(?:{terms[-1]}){char}"
+            elif last in (_ATOM, _LOOKAROUND):
+                terms[-1] = f"(?:{terms[-1]}){quantifier}"
                 last = _QUANTIFIED
             else:
                 raise InvalidPatternError("nothing to repeat")
@@ -284,21 +303,27 @@ class _Translator:
         return _literal(char), _ATOM
 
     def _group(self) -> tuple[str, int]:
-        kind = _ATOM
-        opener = "(?:"
-        if self._peek() == "?":
-            marker = self._peek(1)
-            if marker not in (":", "=", "!"):
-                raise InvalidPatternError("invalid group")
-            self._index += 2
-            opener = "(?" + marker
-            if marker != ":":
-                kind = _LOOKAROUND
+        if self._peek() != "?":
+            number = self._next_group
+            self._next_group += 1
+            self._open_groups.add(number)
+            inner = self._disjunction()
+            self._close_group()
+            self._open_groups.discard(number)
+            self._closed_groups.add(number)
+            return f"({inner})", _ATOM
+        marker = self._peek(1)
+        if marker not in (":", "=", "!"):
+            raise InvalidPatternError("invalid group")
+        self._index += 2
         inner = self._disjunction()
+        self._close_group()
+        return f"(?{marker}{inner})", _ATOM if marker == ":" else _LOOKAROUND
+
+    def _close_group(self) -> None:
         if self._peek() != ")":
             raise InvalidPatternError("unterminated group")
         self._index += 1
-        return f"{opener}{inner})", kind
 
     def _escape_outside_class(self) -> tuple[str, int]:
         self._index += 1
@@ -315,7 +340,28 @@ class _Translator:
         if letter == "B":
             self._index += 1
             return _NOT_WORD_BOUNDARY, _ASSERTION
+        if letter in "123456789" and letter != "":
+            backreference = self._backreference()
+            if backreference is not None:
+                return backreference, _ATOM
         return _literal(self._character_escape(in_class=False)), _ATOM
+
+    def _backreference(self) -> str | None:
+        """Translate ``\\N`` when N names a capturing group, else return None.
+
+        A reference to a group that has not closed yet matches the empty string
+        in JavaScript. A closed group that did not participate also matches
+        empty, and a participating one matches its text ignoring case.
+        """
+        digits = re.match(r"[0-9]+", self._source[self._index :])
+        assert digits is not None
+        number = int(digits.group(0))
+        if number > self._group_total:
+            return None
+        self._index += len(digits.group(0))
+        if number in self._closed_groups and number not in self._open_groups:
+            return f"(?:(?({number})(?i:\\{number})|))"
+        return "(?:)"
 
     def _character_escape(self, *, in_class: bool) -> str:
         """Consume an escape that denotes one character and return it.
@@ -355,8 +401,8 @@ class _Translator:
         return chr(int(value, 16))
 
     def _legacy_octal(self, first: str) -> str:
-        # The expressions have no capturing groups, so a decimal escape is a
-        # legacy octal escape of up to three digits with a value up to 0o377.
+        # A decimal escape that is not a backreference is a legacy octal
+        # escape of up to three digits with a value up to 0o377.
         digits = first
         while len(digits) < 3 and self._peek() in tuple("01234567"):
             if int(digits + self._peek(), 8) > 0o377:
@@ -365,62 +411,113 @@ class _Translator:
             self._index += 1
         return chr(int(digits, 8))
 
+    def _class_atom(self) -> _ClassAtom:
+        char = self._source[self._index]
+        if char != "\\":
+            self._index += 1
+            return _ClassAtom(_class_member(char), char)
+        self._index += 1
+        letter = self._peek()
+        if letter in _CLASS_ESCAPES:
+            self._index += 1
+            return _ClassAtom(_CLASS_ESCAPES[letter], None)
+        if letter.lower() in _CLASS_ESCAPES:
+            self._index += 1
+            return _ClassAtom(_CLASS_ESCAPES[letter.lower()], None, complement=True)
+        value = self._character_escape(in_class=True)
+        return _ClassAtom(_class_member(value), value)
+
     def _character_class(self) -> str:
         negated = self._peek() == "^"
         if negated:
             self._index += 1
-        atoms: list[_ClassAtom] = []
+        members: list[str] = []
         complements: list[str] = []
+
+        def add(atom: _ClassAtom) -> None:
+            if atom.complement:
+                complements.append(atom.text)
+                return
+            members.append(atom.text)
+            if atom.char is not None:
+                members.extend(map(_class_member, _CASE_EQUIVALENTS.get(atom.char, "")))
+
         while True:
             if self._index >= len(self._source):
                 raise InvalidPatternError("unterminated character class")
-            char = self._source[self._index]
-            if char == "]":
+            if self._peek() == "]":
                 self._index += 1
                 break
-            if char != "\\":
-                self._index += 1
-                atoms.append(_ClassAtom(_class_member(char), char, is_hyphen=char == "-"))
+            start = self._class_atom()
+            if self._peek() != "-" or self._peek(1) in ("]", ""):
+                add(start)
                 continue
             self._index += 1
-            letter = self._peek()
-            if letter in _CLASS_ESCAPES:
-                self._index += 1
-                atoms.append(_ClassAtom(_CLASS_ESCAPES[letter], None))
-            elif letter.lower() in _CLASS_ESCAPES:
-                # \D, \W and \S cannot nest inside a Python class.
-                self._index += 1
-                complements.append(_CLASS_ESCAPES[letter.lower()])
-            else:
-                value = self._character_escape(in_class=True)
-                atoms.append(_ClassAtom(_class_member(value), value))
-        members = "".join(self._class_ranges(atoms))
+            if self._index >= len(self._source):
+                raise InvalidPatternError("unterminated character class")
+            end = self._class_atom()
+            if start.char is None or end.char is None:
+                # Annex B: a range with a class escape at either end is the
+                # union of both ends and a literal hyphen.
+                add(start)
+                add(_ClassAtom(_class_member("-"), "-"))
+                add(end)
+                continue
+            if start.char > end.char:
+                raise InvalidPatternError("range out of order in character class")
+            members.append(f"{start.text}-{end.text}")
+            members.extend(map(_class_member, _case_equivalents_in_range(start.char, end.char)))
+
+        body = "".join(members)
         if not complements:
             if negated:
-                return f"[^{members}]" if members else _ANY
-            return f"[{members}]" if members else _NEVER
-        alternatives = ([f"[{members}]"] if members else []) + [f"[^{c}]" for c in complements]
+                return f"[^{body}]" if body else _ANY
+            return f"[{body}]" if body else _NEVER
+        alternatives = ([f"[{body}]"] if body else []) + [f"[^{c}]" for c in complements]
         union = "|".join(alternatives)
         return f"(?:(?!{union}){_ANY})" if negated else f"(?:{union})"
 
-    @staticmethod
-    def _class_ranges(atoms: list[_ClassAtom]) -> Iterable[str]:
-        index = 0
-        while index < len(atoms):
-            atom = atoms[index]
-            if index + 2 < len(atoms) and atoms[index + 1].is_hyphen:
-                end = atoms[index + 2]
-                if atom.char is not None and end.char is not None:
-                    if atom.char > end.char:
-                        raise InvalidPatternError("range out of order in character class")
-                    yield f"{atom.text}-{end.text}"
-                    yield from map(_class_member, _case_equivalents_in_range(atom.char, end.char))
-                    index += 3
-                    continue
-            yield atom.text
-            if atom.char is not None:
-                yield from map(_class_member, _CASE_EQUIVALENTS.get(atom.char, ""))
-            index += 1
+
+def _python_braces(braces: re.Match[str]) -> str:
+    minimum = int(braces.group(1))
+    if minimum >= _JS_MAX_REPEAT_MINIMUM:
+        raise InvalidPatternError("number too large in {} quantifier")
+    low = min(minimum, _PYTHON_MAX_REPEAT)
+    if braces.group(2) is None:
+        return f"{{{low}}}"
+    if braces.group(3) == "":
+        return f"{{{low},}}"
+    maximum = int(braces.group(3))
+    if maximum < minimum:
+        raise InvalidPatternError("numbers out of order in {} quantifier")
+    if maximum > _PYTHON_MAX_REPEAT:
+        return f"{{{low},}}"
+    return f"{{{low},{maximum}}}"
+
+
+def _count_capturing_groups(source: str) -> tuple[int, int]:
+    """Count capturing groups and the deepest group nesting in a regex source."""
+    groups = depth = deepest = 0
+    index = 0
+    in_class = False
+    while index < len(source):
+        char = source[index]
+        if char == "\\":
+            index += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+        elif char == "(":
+            depth += 1
+            deepest = max(deepest, depth)
+            if source[index + 1 : index + 2] != "?":
+                groups += 1
+        elif char == ")":
+            depth = max(depth - 1, 0)
+        index += 1
+    return groups, deepest
 
 
 # Rules and matching ---------------------------------------------------------
@@ -475,8 +572,12 @@ def _compile(pattern: str) -> _Rule | None:
     body = units[1:] if negative else units
     body = re.sub(r"^\\!", "!", body, count=1)
     body = re.sub(r"^\\#", "#", body, count=1)
-    translated = _Translator(_javascript_source(body)).translate()
-    return _Rule(negative, re.compile(translated))
+    try:
+        translated = _Translator(_javascript_source(body)).translate()
+        regex = re.compile(translated)
+    except RecursionError as error:
+        raise InvalidPatternError("pattern too deeply nested to translate") from error
+    return _Rule(negative, regex)
 
 
 def is_valid_pattern(pattern: str) -> bool:
