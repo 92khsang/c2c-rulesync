@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.15"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.11"
+      - run: uv sync --locked
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run mypy
+
+  test:
+    name: test (${{ matrix.os }}, python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, python: "3.11" }
+          - { os: ubuntu-24.04, python: "3.14" }
+          - { os: macos-15, python: "3.14" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - name: Confirm the interpreter under test
+        run: uv run python -c 'import sys; v = "%d.%d" % sys.version_info[:2]; assert v == "${{ matrix.python }}", v'
+      - run: uv run pytest
+
+  package:
+    # Git install is the only distribution channel, so the built wheel itself
+    # must install, carry its license files, and run the console script.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.11"
+      - run: uv build
+      - name: Wheel carries both license files
+        run: |
+          python3 - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          for required in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
+              assert any(n.endswith(f".dist-info/licenses/{required}") for n in names), (required, names)
+          PY
+      - name: Installed console script runs
+        run: |
+          set -eu
+          wheel="$(ls dist/*.whl)"
+          test "$(uv run --isolated --no-project --with "$wheel" c2c-rulesync --version)" = "c2c-rulesync 0.1.0"
+          out="$(printf '{}' | uv run --isolated --no-project --with "$wheel" c2c-rulesync hook)"
+          test -z "$out"
+
+  ci-ok:
+    # The single required status check for main. It fails unless every job
+    # above succeeded, so matrix changes never rename the required check.
+    if: always()
+    needs: [lint, test, package]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: All required jobs succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            test "$result" = "success"
+          done

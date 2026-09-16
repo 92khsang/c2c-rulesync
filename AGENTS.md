@@ -1,0 +1,37 @@
+c2c-rulesync is a Codex CLI command hook that loads Claude Code `.claude/rules/*.md` files into
+Codex under the conditions Claude Code 2.1.273 loads them. It is a Python port of codex-path-rules.
+
+## Rules
+
+- `c2c-rulesync hook` fails open: every path exits 0 and writes either nothing or exactly one JSON
+  object to stdout. No command may exit 2, because Codex treats exit 2 with stderr output from a
+  `PreToolUse` hook as a block of the tool call.
+- The runtime is standard library only. `dependencies` in `pyproject.toml` stays empty, and the
+  code must run on the `requires-python` floor.
+- Do not copy code, regular expressions, or minified identifiers from the Claude Code binary.
+  Describe Claude Code behavior as observed results, and cite public URLs, upstream commits, or
+  committed test data.
+- Build rule trees for tests under `tmp_path`. Never commit a `.claude/rules` directory under
+  `tests/`: Claude Code and this hook would load it as real instructions.
+
+## Commands
+
+```bash
+uv sync --locked
+uv run pytest tests/test_cli.py -k version   # one test
+uv run pytest                                 # full suite
+uv run ruff check && uv run ruff format --check
+uv run mypy
+```
+
+## Contributing
+
+Branch from `main` as `<type>/<slug>`. Commit messages and PR titles follow Conventional Commits;
+wire the template with `git config commit.template .gitmessage`. Fill
+`.github/pull_request_template.md` with the commands you actually ran. `main` is protected: an agent
+may open a PR and squash-merge it once the `ci-ok` check is green, and never pushes to `main`.
+
+## Pointers
+
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — upstream MIT notices; update it in the same
+  change that ports code or test data from another project.
