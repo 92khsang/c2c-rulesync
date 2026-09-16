@@ -16,6 +16,92 @@ Each behavior is labeled with how it is known:
 | observed | Observed in the installed Claude Code without an end-to-end confirmation. |
 | oracle-confirmed | Recorded from a real Claude Code session through the `InstructionsLoaded` hook, committed under `tests/parity/`. |
 
+## Finding rules
+
+`src/c2c_rulesync/rules.py` decides which rule files load and when. Each
+statement is observed in Claude Code 2.1.273 unless labeled otherwise.
+
+### Where rules live
+
+- **User rules** live in one directory, `~/.claude/rules` by default. Their
+  globs match paths relative to the session's working directory.
+- **Project rules** live in a `.claude/rules` directory of the working
+  directory, of any of its ancestors except the filesystem root, or of any
+  directory below the working directory. Their globs match paths relative to
+  the directory that contains `.claude`.
+
+A rules directory is searched recursively. A rule file's name must end in
+exactly `.md`, so `RULE.MD` is not a rule. Claude Code visits files in
+directory order; c2c-rulesync sorts names so the order is stable.
+
+### When rules load
+
+At session start:
+
+1. unconditional user rules;
+2. unconditional project rules of the outermost ancestor, then of each
+   directory down to the working directory.
+
+When a file is read:
+
+1. user rules whose globs match it;
+2. for each directory strictly between the working directory and the file,
+   outermost first: all its unconditional rules, then its rules whose globs
+   match;
+3. rules of the working directory and its ancestors whose globs match,
+   outermost first.
+
+A file outside the working directory loads no rule. A relative path that is
+empty or starts with `..`, including a directory named `..foo`, matches no
+glob. When the path relative to the base directory leaves it, the file's parent
+directory is resolved through links and the path is tried again; the file
+itself is never resolved, so `src/link.ts` linking to `lib/real.ts` matches
+`src/**`, not `lib/**`.
+
+A session loads each rule file at most once, and reading a rule file counts as
+loading it, so a later matching read does not load it again. Within one scan, a
+file reached twice, for example through a link, loads once. When the user rules
+directory is also a project rules directory, as `~/.claude/rules` is for a
+session under the home directory, the user copy loads first and wins; this
+follows from the load order and has not been checked in a session.
+
+A rule file is skipped when its body is empty after front matter and comments
+are removed, or when it is larger than 4 MiB (c2c-rulesync warns). Invalid
+UTF-8 is replaced and loads, with a warning.
+
+### Git worktrees
+
+When the working directory is inside a git worktree nested in its own main
+repository, such as `repo/.claude/worktrees/w1`, the main repository's
+directories from its root down to the worktree root are not ancestors for rule
+loading. The worktree's own checked-out `.claude/rules` loads instead, and
+ancestors above the main repository still load.
+
+### Links
+
+- Links to files and directories are followed, and link cycles end.
+- A link that cannot be followed is skipped; c2c-rulesync warns.
+- A project `.claude/rules` that is itself a link is skipped unless it
+  resolves inside the working directory.
+- A project rules entry whose resolved path is not its own place in the
+  directory must resolve inside the working directory. An ancestor rules
+  directory is outside the working directory, so even its link to a file
+  beside it is skipped.
+- These checks do not apply when the rules directory is reached through a
+  linked parent, such as a linked `.claude`: rules from anywhere load.
+- User rules may link anywhere.
+
+### Not implemented
+
+Claude Code also loads instructions that c2c-rulesync does not bring to Codex:
+
+- `CLAUDE.md` and `CLAUDE.local.md` files, at any level;
+- the managed (system-wide) rules directory;
+- rules in `--add-dir` directories with
+  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`;
+- `@path` imports inside rule files, and approved external imports;
+- `claudeMdExcludes` settings.
+
 ## Which tool calls load rules
 
 Claude Code loads path-scoped rules when it reads a file, including before an
