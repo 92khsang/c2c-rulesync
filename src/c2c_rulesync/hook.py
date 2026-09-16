@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import time
 from collections.abc import Callable, Mapping
 
 from c2c_rulesync.payload import Payload, parse_payload
@@ -27,6 +28,9 @@ from c2c_rulesync.touched import touched_paths
 __all__ = ["run_hook"]
 
 _START_SOURCES = ("startup", "clear", "compact")
+# Rules for touched files are looked up until this many seconds after the hook
+# started; the rest are left for a later tool call, within the CLI's deadline.
+TRIGGER_BUDGET_SECONDS = 3.0
 
 
 def run_hook(
@@ -39,6 +43,7 @@ def run_hook(
     ``emit`` is called at most once, with one JSON object. Errors propagate;
     the caller turns them into a silent exit.
     """
+    started = time.monotonic()
     environ = os.environ if environ is None else environ
     payload = parse_payload(data)
     if payload is None:
@@ -56,14 +61,25 @@ def run_hook(
         if root is not None and payload.session_id is not None
         else None
     )
-    if thread is not None and (event == "PostCompact" or payload.source == "compact"):
-        with contextlib.suppress(OSError):
-            thread.new_epoch()
-    if injects:
-        _inject(payload, thread, environ, emit)
     if root is not None:
+        # The sweep runs before any output, so that nothing slow follows the
+        # record of delivered rules; this session is marked as in use first.
         with contextlib.suppress(OSError):
+            if thread is not None:
+                thread.touch()
             sweep(root)
+    if thread is not None and (event == "PostCompact" or payload.source == "compact"):
+        try:
+            thread.new_epoch()
+        except OSError:
+            # Forgetting the record is as good as a new epoch; if that fails
+            # too, this start injects without a record.
+            try:
+                thread.forget()
+            except OSError:
+                thread = None
+    if injects:
+        _inject(payload, thread, environ, emit, started)
 
 
 def _inject(
@@ -71,6 +87,7 @@ def _inject(
     thread: ThreadState | None,
     environ: Mapping[str, str],
     emit: Callable[[bytes], None],
+    started: float,
 ) -> None:
     event = payload.event
     cwd = payload.cwd or os.getcwd()
@@ -91,22 +108,33 @@ def _inject(
 
     # Discovery runs before taking the lock, which parallel tool calls share.
     finder = RuleFinder(cwd, _user_rules_dir(environ, cwd, home))
-    start_rules = [] if start_known_done else finder.session_start_rules()
-    triggered = [(path, finder.trigger_rules(path)) for path in touched]
+    start_rules = None if start_known_done else finder.session_start_rules()
+    triggered = []
+    for path in touched:
+        if time.monotonic() - started > TRIGGER_BUDGET_SECONDS:
+            break
+        triggered.append((path, finder.trigger_rules(path)))
 
-    def respond(state: State) -> tuple[bytes | None, State]:
+    def respond(state: State, notes: tuple[str, ...] = ()) -> tuple[bytes | None, State]:
+        nonlocal start_rules
         session = SessionRules(set(state.loaded))
         rules = []
         start_done = state.start_done
-        if not start_done and not start_known_done:
+        if not start_done:
+            # A compaction since the unlocked read makes start rules due again.
+            if start_rules is None:
+                start_rules = finder.session_start_rules()
             rules += session.take(start_rules)
             start_done = True
         for path, found in triggered:
             # Claude Code records a read before loading the rules it triggers.
-            session.mark_read(path)
+            # Only a Markdown file can be a rule file, so other reads are not
+            # recorded and the record stays small.
+            if path.endswith(".md"):
+                session.mark_read(path)
             rules += session.take(found)
         warnings = [w for w in dict.fromkeys(finder.warnings) if w not in state.warned]
-        messages = [f"c2c-rulesync: {warning}" for warning in warnings]
+        messages = [f"c2c-rulesync: {note}" for note in (*notes, *warnings)]
         if rules:
             loaded = ", ".join(display_path(rule.path, cwd, home) for rule in rules)
             messages.insert(0, f"c2c-rulesync loaded {loaded}")
@@ -129,14 +157,26 @@ def _inject(
                 emitted = True
                 emit(output)
             transaction.commit()
-    except (LockTimeout, OSError):
+    except (LockTimeout, OSError) as error:
         # Without usable state only the start of a thread still injects; a
         # tool call would repeat its rules on every call.
         if emitted or event == "PreToolUse":
             raise
-        output, _ = respond(State(False, set(), []))
+        note = (
+            f"cannot record delivered rules in {thread.directory} ({_describe(error)}); "
+            "rules with paths are not delivered in this thread"
+        )
+        output, _ = respond(State(False, set(), []), (note,))
         if output is not None:
             emit(output)
+
+
+def _describe(error: BaseException) -> str:
+    if isinstance(error, LockTimeout):
+        return "another hook process holds its lock"
+    if isinstance(error, OSError) and error.strerror:
+        return error.strerror
+    return type(error).__name__
 
 
 def _unchanged(old: State, new: State) -> bool:

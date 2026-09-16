@@ -378,3 +378,172 @@ def test_an_unwritable_state_directory_fails_open(codex: Codex) -> None:
 
     assert process.returncode == 0
     assert stdout == b""
+
+
+# Review cases ----------------------------------------------------------------------------
+
+
+def test_sweep_removes_only_the_hooks_own_files(tmp_path: Path) -> None:
+    sessions = tmp_path / "sessions"
+    mine = sessions / "old"
+    theirs = sessions / "2025-conference"
+    elsewhere = tmp_path / "elsewhere"
+    for directory in (mine, theirs, elsewhere):
+        directory.mkdir(parents=True)
+    (mine / "root.json").write_text("{}")
+    (mine / "root.lock").write_text("")
+    (theirs / "notes.md").write_text("keep")
+    (theirs / "slides.json").write_text("keep")
+    (elsewhere / "root.json").write_text("keep")
+    (sessions / "linked").symlink_to(elsewhere)
+    week_ago = time.time() - 8 * 24 * 3600
+    for path in [*mine.iterdir(), *theirs.iterdir(), *elsewhere.iterdir()]:
+        os.utime(path, (week_ago, week_ago))
+
+    sweep(str(tmp_path))
+
+    assert not mine.exists()
+    assert (theirs / "notes.md").exists()
+    assert (elsewhere / "root.json").exists()
+
+
+def test_a_session_in_use_is_not_swept(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n", ".claude/rules/src.md": SCOPED})
+    codex.send("SessionStart")
+    codex.bash("cat src/a.ts")
+    week_ago = time.time() - 8 * 24 * 3600
+    for path in codex.state.rglob("*"):
+        os.utime(path, (week_ago, week_ago))
+
+    assert codex.bash("cat src/a.ts") is None
+    sweep(str(codex.state))
+
+    assert codex.bash("cat src/b.ts") is None
+
+
+def test_compaction_still_resets_when_the_epoch_cannot_be_written(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n", ".claude/rules/src.md": SCOPED})
+    codex.send("SessionStart")
+    codex.bash("cat src/a.ts")
+    for record in codex.state.glob("sessions/*/root.json"):
+        (record.parent / "root.epoch").mkdir()
+
+    codex.send("PostCompact")
+
+    assert rule_paths(codex.send("SessionStart", source="compact")) == [".claude/rules/style.md"]
+    assert rule_paths(codex.bash("cat src/a.ts")) == [".claude/rules/src.md"]
+
+
+def test_an_unusable_state_directory_is_reported_at_session_start(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n"})
+    codex.state.write_text("not a directory")
+
+    output = codex.send("SessionStart")
+
+    assert rule_paths(output) == [".claude/rules/style.md"]
+    assert output is not None and "cannot record delivered rules" in output["systemMessage"]
+
+
+def test_a_held_lock_falls_back_at_start_and_stays_silent_for_tool_calls(
+    codex: Codex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fcntl
+
+    from c2c_rulesync import state
+
+    codex.write({".claude/rules/style.md": "Use tabs.\n", ".claude/rules/src.md": SCOPED})
+    codex.send("SessionStart", session_id="other")
+    (lock,) = codex.state.glob("sessions/other/*.lock")
+    monkeypatch.setattr(state, "LOCK_TIMEOUT_SECONDS", 0.05)
+    with open(lock, "rb") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        started = codex.send("SessionStart", session_id="other")
+        assert rule_paths(started) == [".claude/rules/style.md"]
+        assert started is not None and "another hook process" in started["systemMessage"]
+        # The error reaches the CLI, which exits 0 without output.
+        with pytest.raises(state.LockTimeout):
+            codex.bash("cat src/a.ts", session_id="other")
+
+
+def test_tool_calls_look_up_files_within_a_time_budget(
+    codex: Codex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from c2c_rulesync import hook
+
+    codex.write({".claude/rules/src.md": SCOPED})
+    codex.send("SessionStart")
+    monkeypatch.setattr(hook, "TRIGGER_BUDGET_SECONDS", -1.0)
+    assert codex.bash("cat src/a.ts") is None
+
+    monkeypatch.setattr(hook, "TRIGGER_BUDGET_SECONDS", 3.0)
+    assert rule_paths(codex.bash("cat src/a.ts")) == [".claude/rules/src.md"]
+
+
+def test_only_markdown_reads_are_recorded(codex: Codex) -> None:
+    codex.write({".claude/rules/src.md": SCOPED})
+    codex.send("SessionStart")
+    codex.bash("cat src/a.ts src/b.ts README.md")
+
+    (record,) = codex.state.glob("sessions/*/root.json")
+    loaded = json.loads(record.read_text())["loaded"]
+
+    assert sorted(os.path.relpath(path, codex.project) for path in loaded) == [
+        ".claude/rules/src.md",
+        "README.md",
+    ]
+
+
+def test_start_rules_due_again_after_a_stale_read_are_delivered(
+    codex: Codex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from c2c_rulesync.state import State, ThreadState
+
+    codex.write({".claude/rules/style.md": "Use tabs.\n", ".claude/rules/src.md": SCOPED})
+    codex.send("SessionStart")
+    codex.send("PostCompact")
+    monkeypatch.setattr(ThreadState, "peek", lambda self: State(True, set(), []))
+
+    assert rule_paths(codex.bash("cat src/a.ts")) == [
+        ".claude/rules/style.md",
+        ".claude/rules/src.md",
+    ]
+
+
+def test_threads_without_a_transcript_share_the_main_thread(codex: Codex) -> None:
+    codex.write({".claude/rules/src.md": SCOPED})
+    codex.send("SessionStart", transcript_path=None)
+
+    assert rule_paths(codex.bash("cat src/a.ts", transcript_path=None)) == [".claude/rules/src.md"]
+    assert codex.bash("cat src/a.ts") is None
+
+
+@pytest.mark.parametrize("event", ["SubagentStart", "PreToolUse"])
+def test_warnings_alone_are_valid_output(codex: Codex, event: str) -> None:
+    codex.write({".claude/rules/broken.md": "---\npaths:\n  - **/*.ts\n---\n\n"})
+
+    output = codex.send(event)
+
+    assert output is not None and "hookSpecificOutput" not in output
+    assert "not valid YAML" in output["systemMessage"]
+
+
+def test_clear_starts_like_startup_and_resume_keeps_the_record(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n", ".claude/rules/src.md": SCOPED})
+
+    assert rule_paths(codex.send("SessionStart", source="clear")) == [".claude/rules/style.md"]
+    assert codex.send("SessionStart", source="resume") is None
+    assert rule_paths(codex.bash("cat src/a.ts")) == [".claude/rules/src.md"]
+
+
+def test_duplicate_session_start_processes_deliver_once(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n"})
+    processes = [run_cli(codex, codex.payload("SessionStart")) for _ in range(8)]
+
+    delivered: list[str] = []
+    for process in processes:
+        stdout, _ = process.communicate(timeout=60)
+        assert process.returncode == 0
+        if stdout:
+            delivered += rule_paths(json.loads(stdout))
+
+    assert delivered == [".claude/rules/style.md"]

@@ -28,6 +28,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import time
 from collections.abc import Iterator, Mapping
 
@@ -37,10 +38,11 @@ STATE_VERSION = 1
 LOCK_TIMEOUT_SECONDS = 2.0
 SESSION_MAX_AGE_SECONDS = 7 * 24 * 3600
 SWEEP_INTERVAL_SECONDS = 24 * 3600
-# Warnings are shown once per session; past this many the oldest are forgotten.
-MAX_WARNINGS = 200
+# Warnings are shown once per thread; past this many the oldest are forgotten.
+MAX_WARNINGS = 2000
 
 _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+_STATE_SUFFIXES = (".json", ".epoch", ".lock", ".tmp")
 
 
 class LockTimeout(Exception):
@@ -98,6 +100,20 @@ class ThreadState:
         os.makedirs(self.directory, exist_ok=True)
         _replace_file(self.epoch_path, str(time.time_ns()).encode() + os.urandom(4).hex().encode())
 
+    def touch(self) -> None:
+        """Mark the thread as in use, so that the sweep keeps its session."""
+        with contextlib.suppress(FileNotFoundError):
+            os.utime(self.lock_path)
+
+    def forget(self) -> None:
+        """Remove the thread's record, which then counts as empty.
+
+        Raises:
+            OSError: The record exists and cannot be removed.
+        """
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(self.state_path)
+
     def peek(self) -> State:
         """Read the state without the lock; the result may be stale."""
         return self._read(self._epoch())
@@ -114,6 +130,9 @@ class ThreadState:
         fd = _lock(self.lock_path, time.monotonic() + LOCK_TIMEOUT_SECONDS)
         transaction = None
         try:
+            # A session in use is not swept, even when its record stays the same.
+            with contextlib.suppress(OSError):
+                os.utime(fd)
             epoch = self._epoch()
             transaction = Transaction(self, epoch, self._read(epoch))
             yield transaction
@@ -197,42 +216,53 @@ class Transaction:
 
 
 def sweep(root: str, now: float | None = None) -> None:
-    """Remove the state of sessions untouched for a week, at most once a day."""
+    """Remove the state of sessions unused for a week, at most once a day.
+
+    Only the hook's own files are removed: in each real directory under
+    ``sessions``, files ending in ``.json``, ``.epoch``, ``.lock`` or ``.tmp``,
+    and the directory itself once it is empty.
+    """
     now = time.time() if now is None else now
     marker = os.path.join(root, "sweep")
     try:
-        if now - os.stat(marker).st_mtime < SWEEP_INTERVAL_SECONDS:
+        if now - os.lstat(marker).st_mtime < SWEEP_INTERVAL_SECONDS:
             return
     except FileNotFoundError:
         pass
-    os.makedirs(root, exist_ok=True)
-    with open(marker, "ab"):
-        pass
-    os.utime(marker, (now, now))
     sessions = os.path.join(root, "sessions")
     try:
         names = os.listdir(sessions)
     except OSError:
         return
+    _replace_file(marker, b"")
+    os.utime(marker, (now, now))
     for name in names:
         with contextlib.suppress(OSError):
             _remove_stale_session(os.path.join(sessions, name), now)
 
 
 def _remove_stale_session(directory: str, now: float) -> None:
-    entries = [os.path.join(directory, name) for name in os.listdir(directory)]
-    if any(now - os.stat(entry).st_mtime < SESSION_MAX_AGE_SECONDS for entry in entries):
+    if not stat.S_ISDIR(os.lstat(directory).st_mode):
         return
+    entries = [os.path.join(directory, name) for name in os.listdir(directory)]
+    owned = []
+    for entry in entries:
+        info = os.lstat(entry)
+        if now - info.st_mtime < SESSION_MAX_AGE_SECONDS:
+            return
+        if stat.S_ISREG(info.st_mode) and entry.endswith(_STATE_SUFFIXES):
+            owned.append(entry)
     held = []
     try:
-        for entry in entries:
+        for entry in owned:
             if entry.endswith(".lock"):
-                fd = os.open(entry, os.O_RDWR)
+                fd = os.open(entry, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
                 held.append(fd)
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        for entry in entries:
+        for entry in owned:
             os.unlink(entry)
-        os.rmdir(directory)
+        if len(owned) == len(entries):
+            os.rmdir(directory)
     finally:
         for fd in held:
             os.close(fd)

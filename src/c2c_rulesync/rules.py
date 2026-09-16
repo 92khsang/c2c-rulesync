@@ -82,7 +82,10 @@ class RuleFinder:
         self.user_rules_dir = user_rules_dir
         self.warnings: list[str] = []
         self._rule_cache: dict[str, Rule | None] = {}
+        self._files: dict[tuple[str, str], list[str]] = {}
+        self._matchers: dict[tuple[str, ...], Matcher] = {}
         self._worktree = _nested_worktree(self.cwd)
+        self._levels: list[str] | None = None
 
     # Public API -------------------------------------------------------------
 
@@ -131,13 +134,16 @@ class RuleFinder:
 
     def _cwd_level_dirs(self) -> list[str]:
         """The working directory and its ancestors, filesystem root excluded, outermost first."""
+        if self._levels is not None:
+            return self._levels
         directories = []
         directory = self.cwd
         while directory != os.path.dirname(directory):
             directories.append(directory)
             directory = os.path.dirname(directory)
         directories.reverse()
-        return [d for d in directories if not self._skipped_by_worktree(d)]
+        self._levels = [d for d in directories if not self._skipped_by_worktree(d)]
+        return self._levels
 
     def _nested_dirs(self, target: str) -> list[str]:
         """Directories between the working directory and ``target``, outermost first."""
@@ -182,31 +188,61 @@ class RuleFinder:
                 relative = _relative(base, os.path.join(resolved_parent, os.path.basename(target)))
         if not relative or relative.startswith("..") or os.path.isabs(relative):
             return []
-        return [rule for rule in rules if rule.globs and Matcher(rule.globs).ignores(relative)]
+        return [
+            rule for rule in rules if rule.globs and self._matcher(rule.globs).ignores(relative)
+        ]
+
+    def _matcher(self, globs: tuple[str, ...]) -> Matcher:
+        matcher = self._matchers.get(globs)
+        if matcher is None:
+            matcher = self._matchers[globs] = Matcher(globs)
+        return matcher
 
     def _walk(
-        self,
-        rules_dir: str,
-        source: str,
-        processed: set[str],
-        *,
-        conditional: bool,
-        visited: set[str] | None = None,
-        depth: int = 0,
+        self, rules_dir: str, source: str, processed: set[str], *, conditional: bool
     ) -> list[Rule]:
         """Load the rules under ``rules_dir`` that have globs, or that have none.
+
+        Every rule file a walk reaches counts as processed, whatever its globs,
+        so a later walk in the same scan does not load it again.
+        """
+        found: list[Rule] = []
+        for path in self._rule_files(rules_dir, source):
+            if path in processed:
+                continue
+            processed.add(path)
+            rule = self._read_rule(path, source)
+            if rule is None or js_trim(rule.body) == "":
+                continue
+            if (rule.globs is not None) == conditional:
+                found.append(rule)
+        return found
+
+    def _rule_files(self, rules_dir: str, source: str) -> list[str]:
+        """Resolved paths of the rule files under ``rules_dir``, in walk order."""
+        key = (rules_dir, source)
+        files = self._files.get(key)
+        if files is None:
+            files = []
+            self._collect(rules_dir, source, files, set(), 0)
+            self._files[key] = files
+        return files
+
+    def _collect(
+        self, rules_dir: str, source: str, files: list[str], visited: set[str], depth: int
+    ) -> None:
+        """Add the rule files under ``rules_dir`` to ``files``.
 
         Links are followed. For project rules, a rules directory that is itself
         a link must resolve inside the working directory, and so must an entry
         that resolves somewhere other than its own place in the directory.
         These containment checks ignore case, as Claude Code's do.
         """
-        visited = set() if visited is None else visited
         if rules_dir in visited:
-            return []
+            return
         if depth > MAX_DIRECTORY_DEPTH:
             self.warnings.append(f"{rules_dir}: nested too deeply; its rules are not loaded")
-            return []
+            return
         resolved_dir = os.path.realpath(rules_dir)
         visited.add(rules_dir)
         visited.add(resolved_dir)
@@ -216,17 +252,16 @@ class RuleFinder:
             and os.path.islink(rules_dir)
             and not _is_within_folded(resolved_dir, self.cwd)
         ):
-            return []
+            return
         try:
             names = sorted(os.listdir(resolved_dir))
         except (FileNotFoundError, NotADirectoryError):
-            return []
+            return
         except OSError as error:
             self.warnings.append(
                 f"{rules_dir}: {error.strerror or error}; its rules are not loaded"
             )
-            return []
-        found: list[Rule] = []
+            return
         for name in names:
             if not _is_utf8(name):
                 # Claude Code's runtime cannot open such names and skips them.
@@ -247,34 +282,9 @@ class RuleFinder:
             ):
                 continue
             if stat.S_ISDIR(mode):
-                found += self._walk(
-                    resolved,
-                    source,
-                    processed,
-                    conditional=conditional,
-                    visited=visited,
-                    depth=depth + 1,
-                )
+                self._collect(resolved, source, files, visited, depth + 1)
             elif stat.S_ISREG(mode) and name.endswith(".md"):
-                rule = self._load(resolved, source, processed)
-                if rule is not None and (rule.globs is not None) == conditional:
-                    found.append(rule)
-        return found
-
-    def _load(self, path: str, source: str, processed: set[str]) -> Rule | None:
-        normalized = os.path.normpath(path)
-        if normalized in processed:
-            return None
-        resolved = os.path.realpath(path)
-        if resolved != normalized:
-            if resolved in processed:
-                return None
-            processed.add(resolved)
-        processed.add(normalized)
-        rule = self._read_rule(normalized, source)
-        if rule is None or js_trim(rule.body) == "":
-            return None
-        return rule
+                files.append(resolved)
 
     def _read_rule(self, path: str, source: str) -> Rule | None:
         key = f"{source}\0{path}"
