@@ -16,7 +16,7 @@ from typing import Any
 from c2c_rulesync import bun_yaml
 from c2c_rulesync.markdown_blocks import strip_block_comments
 
-__all__ = ["RuleText", "normalize_globs", "parse_rule_text", "strip_html_comments"]
+__all__ = ["RuleText", "js_trim", "normalize_globs", "parse_rule_text", "strip_html_comments"]
 
 # JavaScript's white space and line terminators, as matched by \s and removed
 # by String.prototype.trim.
@@ -247,13 +247,13 @@ def _normalize_string(value: str, budget: list[int], warnings: list[str]) -> lis
             depth -= 1
             current.append(char)
         elif char == "," and depth == 0:
-            item = _js_trim("".join(current))
+            item = js_trim("".join(current))
             if item:
                 items.append(item)
             current = []
         else:
             current.append(char)
-    item = _js_trim("".join(current))
+    item = js_trim("".join(current))
     if item:
         items.append(item)
     return [glob for item in items for glob in _expand_braces(item, budget, warnings)]
@@ -272,7 +272,7 @@ def _expand_braces(item: str, budget: list[int], warnings: list[str]) -> list[st
             results.append(current)
             continue
         prefix, alternatives, suffix = match.group(1), match.group(2), match.group(3)
-        options = [_js_trim(option) for option in alternatives.split(",")]
+        options = [js_trim(option) for option in alternatives.split(",")]
         budget[1] -= _utf16_length(current)
         projected = len(results) + len(stack) + len(options)
         if budget[1] < 0 or projected > budget[0] or projected * item_length > budget[1]:
@@ -286,7 +286,8 @@ def _expand_braces(item: str, budget: list[int], warnings: list[str]) -> list[st
     return results
 
 
-def _js_trim(text: str) -> str:
+def js_trim(text: str) -> str:
+    """Remove what JavaScript's String.prototype.trim removes from both ends."""
     return text.strip(_JS_WHITESPACE)
 
 
