@@ -33,6 +33,7 @@ bun scripts/gen_yaml_vectors.mjs tests/vectors/bun_yaml.json               # Bun
 node scripts/gen_comment_vectors.mjs <marked 15.0.12 dir> tests/vectors/marked_comments.json
 python3 scripts/gen_parity_cases.py tests/parity/cases.json
 python3 scripts/claude_parity_oracle.py --claude-bin <claude 2.1.273> [--only <case id>]  # paid
+python3 scripts/codex_e2e.py [--model <cheap model>]   # paid, real Codex CLI and login
 ```
 
 ## Contributing

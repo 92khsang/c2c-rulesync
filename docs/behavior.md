@@ -267,6 +267,25 @@ Limits of the Codex events:
 - A file edited by `apply_patch` without a prior read loads its rules just
   before the patch applies, after the model has already written the patch.
 
+### Checked with Codex
+
+`scripts/codex_e2e.py` runs short `codex exec` sessions against a temporary git
+repository with the hook wired in, and reads the rule elements Codex recorded
+as developer messages in each session's rollout file. With Codex CLI 0.154.0
+(`gpt-5.6-luna`, reasoning low, September 2026) it confirmed:
+
+- a new session receives the unconditional rules of the working directory and
+  of an ancestor;
+- a shell `cat` of a file receives its path-scoped rule once;
+- `codex exec resume` receives nothing again;
+- `apply_patch` adding a file receives the rules of the nested directory it is
+  added under;
+- hooks defined in a trusted project `.codex/config.toml` behave the same as
+  hooks passed with `-c`.
+
+It uses the developer's Codex login and configuration, including their own
+hooks, and never runs in CI. Compaction and subagents are not exercised.
+
 ### Output
 
 Rules reach the model as one `<rule path="...">` element each, joined by blank
