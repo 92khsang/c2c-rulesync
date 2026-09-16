@@ -206,6 +206,78 @@ Codex runs a command in its tool call's `workdir` when one is given, but does
 not pass `workdir` to hooks, so relative paths resolve against the session's
 working directory.
 
+## Delivering rules in Codex
+
+`src/c2c_rulesync/hook.py` handles the Codex events wired in the README
+(Codex 0.145.0 or later; behavior checked against the Codex 0.154.0 source and
+hook schemas, vendored under `tests/vectors/codex-0.154.0/`).
+
+| Event | What c2c-rulesync does |
+|---|---|
+| `SessionStart` with source `startup` or `clear` | Injects the session start rules. |
+| `SessionStart` with source `compact` | Forgets what the thread received, then injects the session start rules. |
+| `SessionStart` with source `resume` | Nothing: the resumed conversation still holds what it received. |
+| `SubagentStart` | Injects the session start rules into the subagent. |
+| `PreToolUse` | Injects the rules the tool call's files load, and any session start rules the thread has not received. |
+| `PostCompact` | Forgets what the thread received; prints nothing. |
+
+### Once per thread
+
+Like Claude Code, each thread of a session receives a rule file once until
+its conversation is compacted. c2c-rulesync records what each thread received
+under the state directory (see the README), per session id and thread:
+
+- a subagent spawned by a tool is its own thread, named by its `agent_id`;
+- another internal thread, such as a review, is told apart by the thread id in
+  its transcript file name (inferred from the Codex source, not observed). An
+  ephemeral session has no transcript, so its internal threads share the main
+  thread's record, and a rule one of them receives is not sent to the other;
+- everything else belongs to the main thread.
+
+Reading a rule file counts as receiving it; only reads of `.md` files are
+recorded, so reading a rule through a link to a file with another extension
+does not.
+
+Hook processes of one thread run one at a time under a file lock, and output
+is written only after the new record is staged, then the record is committed.
+A failure before the commit makes a rule arrive again later. A hook process
+killed after the commit but before Codex reads its output (a Codex timeout or
+an interrupt) can lose that delivery until the next compaction.
+
+When the record cannot be kept (an unusable state directory, or a lock held
+for more than 2 seconds), `SessionStart` and `SubagentStart` still inject and
+say so in the hook message, and `PreToolUse` injects nothing. A compaction
+whose new epoch cannot be written removes the record instead.
+
+Rules for the files of one tool call are looked up for at most 3 seconds after
+the hook starts; files left over are looked up again on a later call. Records
+of sessions whose files have not been used for a week are removed; the sweep
+removes only the hook's own files.
+
+Limits of the Codex events:
+
+- A subagent receives no `SessionStart` after it compacts; its session start
+  rules come back with its next wired tool call.
+- A forked conversation (`codex fork`, or a subagent spawned with the parent's
+  history) is a new thread and receives rules again, which duplicates them in
+  the copied history.
+- The session start rules are those of the working directory when a thread
+  first receives them; rules without `paths:` of a directory the session
+  changes to later are not delivered.
+- A file edited by `apply_patch` without a prior read loads its rules just
+  before the patch applies, after the model has already written the patch.
+
+### Output
+
+Rules reach the model as one `<rule path="...">` element each, joined by blank
+lines, in load order. The path is relative to the working directory when inside
+it, otherwise under `~` when possible. A `</rule>` inside a rule is written
+`<\/rule>`. The user-facing hook message lists the rules loaded and each
+warning once per thread until compaction (up to 2,000 warnings). Output is
+ASCII-only JSON with only the keys Codex accepts for the event. With
+`additionalContextLimit = 0`, as the README configures, Codex does not limit
+the size of the injected rules.
+
 ## Recorded Claude Code sessions
 
 `tests/parity/` holds what real Claude Code 2.1.273 sessions loaded, and

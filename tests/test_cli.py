@@ -91,7 +91,9 @@ def run_hook_with_handler(
 
 def test_hook_mode_keeps_stray_prints_off_stdout() -> None:
     result = run_hook_with_handler(
-        "def handle_payload(payload):\n    print('stray diagnostic')\n    return b'{\"ok\":true}'\n"
+        "def handle_payload(payload, emit):\n"
+        "    print('stray diagnostic')\n"
+        "    emit(b'{\"ok\":true}')\n"
     )
 
     assert result.returncode == 0
@@ -101,9 +103,9 @@ def test_hook_mode_keeps_stray_prints_off_stdout() -> None:
 
 def test_hook_mode_keeps_stray_prints_off_stdout_when_stderr_is_closed() -> None:
     result = run_hook_with_handler(
-        "def handle_payload(payload):\n"
+        "def handle_payload(payload, emit):\n"
         "    print('stray diagnostic')\n"
-        "    return b'{\"ok\":true}'\n",
+        "    emit(b'{\"ok\":true}')\n",
         shell_redirect="2>&-",
     )
 
@@ -113,7 +115,7 @@ def test_hook_mode_keeps_stray_prints_off_stdout_when_stderr_is_closed() -> None
 
 def test_hook_mode_exits_0_when_stdout_is_closed() -> None:
     result = run_hook_with_handler(
-        "def handle_payload(payload):\n    return b'{}'\n",
+        "def handle_payload(payload, emit):\n    emit(b'{}')\n",
         shell_redirect=">&-",
     )
 
@@ -123,9 +125,9 @@ def test_hook_mode_exits_0_when_stdout_is_closed() -> None:
 def test_hook_mode_exits_0_without_output_past_the_deadline() -> None:
     result = run_hook_with_handler(
         "cli.HOOK_DEADLINE_SECONDS = 0.05\n"
-        "def handle_payload(payload):\n"
+        "def handle_payload(payload, emit):\n"
         "    time.sleep(5)\n"
-        "    return b'{\"late\":true}'\n"
+        "    emit(b'{\"late\":true}')\n"
     )
 
     assert result.returncode == 0

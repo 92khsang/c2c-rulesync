@@ -1,10 +1,115 @@
 # c2c-rulesync
 
 A Codex CLI hook that loads Claude Code `.claude/rules/*.md` files into Codex
-under the same conditions Claude Code loads them.
+under the same conditions Claude Code 2.1.273 loads them.
 
-> **Status:** under development. The hook does not load any rules yet, and no
-> release has been tagged.
+- Rules without `paths:` front matter are injected when a Codex session or
+  subagent starts.
+- Rules with `paths:` are injected the first time a tool call reads or edits a
+  matching file, with Claude Code's glob semantics.
+- Rules come from `~/.claude/rules`, from the `.claude/rules` of the working
+  directory and its ancestors, and from `.claude/rules` directories below the
+  working directory that a touched file lives under.
+
+[docs/behavior.md](docs/behavior.md) specifies what loads when, and every known
+difference from Claude Code.
+
+> **Status:** under development; no release has been tagged yet.
+
+## Requirements
+
+- Codex CLI 0.145.0 or later.
+- Linux or macOS. Windows is untested.
+- [uv](https://docs.astral.sh/uv/), which installs the tool and a Python 3.11
+  or later interpreter for it.
+
+## Install
+
+```bash
+uv tool install git+https://github.com/92khsang/c2c-rulesync@v0.1.0
+c2c-rulesync --version
+```
+
+`uv tool install` puts `c2c-rulesync` in the directory `uv tool dir --bin`
+prints. That directory must be on the `PATH` Codex starts with.
+
+## Configure Codex
+
+Add the hooks to `~/.codex/config.toml`, or to a project's
+`.codex/config.toml`:
+
+```toml
+[[hooks.SessionStart]]
+matcher = "startup|clear|compact"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "c2c-rulesync hook"
+timeout = 10
+additionalContextLimit = 0
+
+[[hooks.SubagentStart]]
+
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = "c2c-rulesync hook"
+timeout = 10
+additionalContextLimit = 0
+
+[[hooks.PreToolUse]]
+matcher = "Bash|apply_patch|view_image"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "c2c-rulesync hook"
+timeout = 10
+additionalContextLimit = 0
+
+[[hooks.PostCompact]]
+
+[[hooks.PostCompact.hooks]]
+type = "command"
+command = "c2c-rulesync hook"
+timeout = 10
+```
+
+Then start Codex and trust the new hooks with `/hooks`. Codex runs a hook only
+while its definition matches what was trusted, so trust them again after
+changing any of these lines.
+
+- `additionalContextLimit = 0` delivers rules whole. Without it, Codex moves
+  hook output longer than about 10,000 bytes into a file and shows the model
+  only its beginning and end.
+- `PostCompact` makes rules deliverable again after Codex compacts a
+  conversation, as Claude Code reloads them after compaction.
+- The hook never blocks a tool call: on any error it exits 0 without output.
+
+## Environment
+
+Codex hooks see the environment Codex was started with, so set these before
+starting Codex:
+
+| Variable | Effect |
+|---|---|
+| `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. |
+| `C2C_RULESYNC_USER_RULES` | `0` turns user rules off. |
+| `C2C_RULESYNC_STATE_DIR` | An absolute directory, used only by c2c-rulesync, for the record of what each session received. A relative value is ignored. The default is `$XDG_STATE_HOME/c2c-rulesync`, or `~/.local/state/c2c-rulesync`. |
+
+If the record cannot be written, the hook says so when a session starts and
+delivers only rules without `paths:`.
+
+## What Codex sees
+
+Rules reach the model in a developer message, one element per rule:
+
+```text
+<rule path=".claude/rules/testing.md">
+Run the unit tests before committing.
+</rule>
+```
+
+The user sees a hook message listing the rules loaded, and any warning about a
+rule file c2c-rulesync could not read the way Claude Code would.
 
 ## License
 
@@ -14,5 +119,8 @@ MIT. See [LICENSE](LICENSE).
 
 c2c-rulesync is a Python port of
 [codex-path-rules](https://github.com/bengous/codex-path-rules) by Augustin
-BENGOLEA, released under the MIT License. Its notice is reproduced in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+BENGOLEA, released under the MIT License. It also ports
+[node-ignore](https://github.com/kaelzhang/node-ignore) 7.0.5, which matches
+globs, and the block lexer of [marked](https://github.com/markedjs/marked)
+15.0.12, which finds the comments Claude Code removes. Their notices are
+reproduced in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
