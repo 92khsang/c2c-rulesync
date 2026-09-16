@@ -4,8 +4,8 @@ Codex runs shell commands as one string in the ``Bash`` tool. This module
 reads that string the way a POSIX shell would split it, closely enough to
 recognize common file-reading commands (``cat``, ``sed``, ``grep`` and similar),
 redirections, ``cd``, ``bash -c`` wrappers and ``apply_patch`` heredocs. It
-never runs anything and never expands globs, variables or command output: a
-word it cannot know is left out.
+never runs anything and never expands globs, braces, variables or command
+output: a word it cannot know is left out.
 """
 
 from __future__ import annotations
@@ -19,11 +19,16 @@ __all__ = ["shell_paths"]
 
 # Nested `bash -c`, `$(...)` and subshells beyond this depth are not examined.
 _MAX_DEPTH = 16
+# Commands examined per call; a longer script is examined up to this point.
+_MAX_COMMANDS = 20_000
+# Longer directory names are treated as unknown.
+_MAX_PATH = 4096
 
-_OPERATORS = ("&&", "||", "|&", ";;", ";&", "|", "&", ";", "(", ")")
+_OPERATORS = ("&&", "||", "|&", ";;&", ";;", ";&", "|", "&", ";", "(", ")")
 _REDIRECTIONS = ("<<<", "<<-", "<<", "<>", "<&", ">&", ">>", ">|", "&>>", "&>", "<", ">")
 _WORD_BREAK = frozenset(" \t\n|&;()<>")
 _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]")
 
 
 class _Word:
@@ -31,7 +36,7 @@ class _Word:
 
     ``known`` is false when the word depends on something only the shell knows
     at run time: a variable, command output, an unexpandable ``~user``, or an
-    unquoted glob character.
+    unquoted glob or brace expansion.
     """
 
     __slots__ = ("known", "text")
@@ -42,14 +47,17 @@ class _Word:
 
 
 class _Command:
-    """A simple command: its words, redirections and here-document bodies."""
+    """A simple command: its words, redirections, here-documents and substitutions."""
 
-    __slots__ = ("heredocs", "redirections", "separator", "words")
+    __slots__ = ("heredocs", "redirections", "separator", "substitutions", "words")
 
     def __init__(self) -> None:
         self.words: list[_Word] = []
         self.redirections: list[tuple[str, _Word]] = []
         self.heredocs: list[str] = []
+        # Commands of the `$(...)`, backquote and `<(...)` substitutions in
+        # the command's words, which run before it.
+        self.substitutions: list[list[_Command]] = []
         # The operator that ends the command: ";", "&&", "||", "|", "&", "\n",
         # "(" or ")", or "" at the end of the script.
         self.separator = ""
@@ -64,40 +72,51 @@ def shell_paths(command: str, cwd: str, home: str | None) -> list[str]:
         home: The home directory for ``~``, or ``None`` when unknown.
 
     Returns:
-        Normalized absolute paths without duplicates, in the order they appear.
-        Directories that exist are left out.
+        Normalized absolute paths without duplicates. Directories that exist
+        are left out.
     """
     finder = _PathFinder(home)
     finder.script(command, cwd, 0)
-    return list(dict.fromkeys(finder.paths))
+    return finder.paths
 
 
 class _PathFinder:
     def __init__(self, home: str | None) -> None:
         self.home = home
         self.paths: list[str] = []
+        self._seen: set[str] = set()
+        self._commands = 0
 
     # Scripts ------------------------------------------------------------------
 
     def script(self, text: str, cwd: str | None, depth: int) -> None:
-        if depth > _MAX_DEPTH:
-            return
-        lexer = _Lexer(text, self.home)
-        commands = lexer.commands()
-        for substitution in lexer.substitutions:
-            self.script(substitution, cwd, depth + 1)
-        saved: list[str | None] = []
+        if depth <= _MAX_DEPTH:
+            self.run(_Lexer(text, self.home, depth).commands(), cwd, depth)
+
+    def run(self, commands: list[_Command], cwd: str | None, depth: int) -> None:
+        subshells: list[str | None] = []
+        directories: list[str | None] = []
         for command in commands:
-            next_cwd = self.command(command, cwd, depth)
+            self._commands += 1
+            if self._commands > _MAX_COMMANDS:
+                return
+            for substitution in command.substitutions:
+                self.run(substitution, cwd, depth + 1)
+            next_cwd = self.command(command, cwd, depth, directories)
             if command.separator == "(":
-                saved.append(cwd)
+                subshells.append(cwd)
             elif command.separator == ")":
-                cwd = saved.pop() if saved else cwd
+                cwd = subshells.pop() if subshells else cwd
             elif command.separator in (";", "&&", "||", "\n", ""):
                 cwd = next_cwd
 
-    def command(self, command: _Command, cwd: str | None, depth: int) -> str | None:
-        """Record the paths of one simple command and return the directory after it."""
+    def command(
+        self, command: _Command, cwd: str | None, depth: int, directories: list[str | None]
+    ) -> str | None:
+        """Record the paths of one simple command and return the directory after it.
+
+        ``directories`` is the ``pushd`` stack of the script.
+        """
         for operator, target in command.redirections:
             if operator in ("<&", ">&") and (target.text.isdigit() or target.text == "-"):
                 continue
@@ -107,44 +126,37 @@ class _PathFinder:
             return cwd
         name = os.path.basename(words[0].text)
         args = words[1:]
-        if name in ("cd", "pushd"):
-            return self._cd(args, cwd)
+        if name == "cd":
+            return _cd(args, cwd)
+        if name == "pushd":
+            directories.append(cwd)
+            return _cd(args, cwd)
         if name == "popd":
-            return None
+            return directories.pop() if directories else None
         if name in _SHELLS:
-            script = _shell_script(args)
+            script = _shell_script(args, command.heredocs)
             if script is not None:
                 self.script(script, cwd, depth + 1)
-            return cwd
-        if name in ("apply_patch", "applypatch"):
+        elif name in ("apply_patch", "applypatch"):
             self._apply_patch(args, command.heredocs, cwd)
-        elif name in _READERS:
-            self.add_all(_operands(args, _READERS[name]), cwd)
-        elif name in ("sed", "gsed"):
-            self.add_all(_script_operands(args, _SED_VALUES, _SED_SCRIPT_OPTIONS, bsd_i=True), cwd)
-        elif name in ("awk", "gawk", "mawk", "nawk"):
-            self.add_all(_script_operands(args, _AWK_VALUES, _AWK_SCRIPT_OPTIONS), cwd)
-        elif name in ("grep", "egrep", "fgrep"):
-            self.add_all(_script_operands(args, _GREP_VALUES, _GREP_SCRIPT_OPTIONS), cwd)
-        elif name == "rg":
-            if any(arg.text == "--files" for arg in args):
-                self.add_all(_operands(args, _RG_VALUES), cwd)
-            else:
-                self.add_all(_script_operands(args, _RG_VALUES, _RG_SCRIPT_OPTIONS), cwd)
         elif name == "git":
             self._git(args, cwd)
+        elif name == "jq":
+            self.add_all(_jq_files(args), cwd)
+        elif name in _READERS:
+            operands, _ = _scan(args, _READERS[name])
+            if name in ("less", "more"):
+                operands = [word for word in operands if not word.text.startswith("+")]
+            self.add_all(operands, cwd)
+        elif name in _SCRIPTED:
+            values, script_options, needs_option = _SCRIPTED[name]
+            files = _script_operands(args, values, script_options, needs_option=needs_option)
+            if name in ("awk", "gawk", "mawk", "nawk"):
+                files = [word for word in files if not _ASSIGNMENT.match(word.text)]
+            self.add_all(files, cwd)
         return cwd
 
     # Commands -----------------------------------------------------------------
-
-    def _cd(self, args: list[_Word], cwd: str | None) -> str | None:
-        operands = _operands(args, frozenset())
-        if len(operands) != 1 or not operands[0].known or operands[0].text in ("", "-"):
-            return None
-        target = operands[0].text
-        if os.path.isabs(target):
-            return os.path.normpath(target)
-        return None if cwd is None else os.path.normpath(os.path.join(cwd, target))
 
     def _apply_patch(self, args: list[_Word], heredocs: list[str], cwd: str | None) -> None:
         if args and args[0].known:
@@ -164,22 +176,34 @@ class _PathFinder:
                 if index + 1 >= len(args):
                     return
                 if option == "-C":
-                    cwd = self._cd([args[index + 1]], cwd)
+                    cwd = _cd([args[index + 1]], cwd)
                 index += 1
             index += 1
-        if index >= len(args):
+        if index >= len(args) or args[index].text not in ("diff", "show", "log", "blame"):
             return
         subcommand = args[index].text
         rest = args[index + 1 :]
-        if subcommand not in ("diff", "show", "log", "blame"):
-            return
         texts = [arg.text for arg in rest]
         if "--" in texts:
             self.add_all(rest[texts.index("--") + 1 :], cwd)
-        elif subcommand == "blame":
-            operands = _operands(rest, _GIT_BLAME_VALUES)
-            if operands:
-                self.add_all(operands[-1:], cwd)
+            return
+        operands, _ = _scan(rest, _GIT_VALUES[subcommand])
+        if subcommand == "blame":
+            self.add_all(operands[-1:], cwd)
+            return
+        for operand in operands:
+            if not operand.known or cwd is None:
+                continue
+            revision, colon, path = operand.text.partition(":")
+            if subcommand == "show" and colon and revision and path:
+                # `rev:path` names a path from the repository's top level,
+                # unless it starts with `./` or `../`.
+                base = cwd if path.startswith(("./", "../")) else _repository_root(cwd)
+                if base is not None:
+                    self.add(_Word(os.path.join(base, path), True), cwd, allow_directory=False)
+            elif os.path.isfile(os.path.join(cwd, operand.text)):
+                # Without `--`, git accepts a path only when the file exists.
+                self.add(operand, cwd, allow_directory=False)
 
     # Paths ----------------------------------------------------------------------
 
@@ -197,11 +221,38 @@ class _PathFinder:
             return
         else:
             path = os.path.normpath(os.path.join(cwd, text))
-        if path.startswith("/dev/") or path == "/dev":
+        if path in self._seen or path.startswith("/dev/") or path == "/dev":
             return
+        self._seen.add(path)
         if not allow_directory and os.path.isdir(path):
             return
         self.paths.append(path)
+
+
+def _cd(args: list[_Word], cwd: str | None) -> str | None:
+    """The directory ``cd ARGS`` changes to, or ``None`` when only the shell knows it."""
+    operands, _ = _scan(args, frozenset())
+    if len(operands) != 1 or not operands[0].known:
+        return None
+    target = operands[0].text
+    if target in ("", "-") or "\0" in target or len(target) > _MAX_PATH:
+        return None
+    if os.path.isabs(target):
+        return os.path.normpath(target)
+    if cwd is None or len(cwd) + len(target) > _MAX_PATH:
+        return None
+    return os.path.normpath(os.path.join(cwd, target))
+
+
+def _repository_root(cwd: str) -> str | None:
+    directory = cwd
+    while True:
+        if os.path.lexists(os.path.join(directory, ".git")):
+            return directory
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return None
+        directory = parent
 
 
 # Command tables -----------------------------------------------------------------
@@ -228,27 +279,64 @@ _READERS = {
         " --italic-text"
     ),
     "tee": _options(""),
+    "diff": _options(
+        "-C -U -F -I -x -X -S -L --label --context --unified --show-function-line"
+        " --ignore-matching-lines --exclude --exclude-from --starting-file --horizon-lines"
+        " --line-format --color --palette"
+    ),
 }
-_SED_VALUES = _options("-e -f -l --expression --file --line-length")
-_SED_SCRIPT_OPTIONS = ("-e", "-f", "--expression", "--file")
-_AWK_VALUES = _options("-f -v -F --file --assign --field-separator")
-_AWK_SCRIPT_OPTIONS = ("-f", "--file")
-_GREP_VALUES = _options(
-    "-e -f -m -A -B -C -d -D --regexp --file --max-count --after-context --before-context"
-    " --context --directories --devices --label --include --exclude --exclude-dir"
-    " --exclude-from --color --colour --binary-files --group-separator"
-)
-_GREP_SCRIPT_OPTIONS = ("-e", "-f", "--regexp", "--file")
-_RG_VALUES = _options(
-    "-e --regexp -f --file -g --glob --iglob -t --type -T --type-not --type-add --type-clear"
-    " -m --max-count -A -B -C --after-context --before-context --context -M --max-columns"
-    " --max-depth -d --maxdepth -j --threads -r --replace -E --encoding --color --colors"
-    " --sort --sortr --ignore-file --pre --pre-glob --path-separator --context-separator"
-    " --field-context-separator --field-match-separator --max-filesize --engine"
-    " --hyperlink-format"
-)
-_RG_SCRIPT_OPTIONS = ("-e", "--regexp", "-f", "--file")
-_GIT_BLAME_VALUES = _options("-L -S --contents --date --ignore-rev --ignore-revs-file")
+# Commands whose first operand is a script or pattern unless an option gives
+# it: (options taking a value, options giving the script, whether the command
+# reads no files at all without such an option).
+_SCRIPTED = {
+    "sed": (
+        _options("-e -f -l --expression --file --line-length"),
+        _options("-e -f --expression --file"),
+        False,
+    ),
+    "awk": (_options("-f -v -F --file --assign --field-separator"), _options("-f --file"), False),
+    "gawk": (
+        _options("-f -v -F -i -l -E --file --assign --field-separator --include --load --exec"),
+        _options("-f -E --file --exec"),
+        False,
+    ),
+    "perl": (_options("-e -E -I -M -m -x"), _options("-e -E"), True),
+    "grep": (
+        _options(
+            "-e -f -m -A -B -C -d -D --regexp --file --max-count --after-context"
+            " --before-context --context --directories --devices --label --include --exclude"
+            " --exclude-dir --exclude-from --color --colour --binary-files --group-separator"
+        ),
+        _options("-e -f --regexp --file"),
+        False,
+    ),
+    "rg": (
+        _options(
+            "-e --regexp -f --file -g --glob --iglob -t --type -T --type-not --type-add"
+            " --type-clear -m --max-count -A -B -C --after-context --before-context --context"
+            " -M --max-columns --max-depth -d --maxdepth -j --threads -r --replace -E"
+            " --encoding --color --colors --sort --sortr --ignore-file --pre --pre-glob"
+            " --path-separator --context-separator --field-context-separator"
+            " --field-match-separator --max-filesize --engine --hyperlink-format"
+            " --dfa-size-limit --regex-size-limit"
+        ),
+        _options("-e --regexp -f --file --files"),
+        False,
+    ),
+}
+_SCRIPTED["gsed"] = _SCRIPTED["sed"]
+_SCRIPTED["mawk"] = _SCRIPTED["nawk"] = _SCRIPTED["awk"]
+_SCRIPTED["egrep"] = _SCRIPTED["fgrep"] = _SCRIPTED["grep"]
+_GIT_VALUES = {
+    "diff": _options("-U -M -C -B -l -S -G -O --output --relative"),
+    "show": _options("-U -M -C -S -G -O --format --pretty --output"),
+    "log": _options(
+        "-n -U -M -C -S -G -L --format --pretty --max-count --skip --since --until --author --grep"
+    ),
+    "blame": _options("-L -S --contents --date --ignore-rev --ignore-revs-file"),
+}
+_JQ_VALUES = _options("-f --from-file -L --indent")
+_JQ_PAIRS = _options("--arg --argjson --slurpfile --rawfile")
 
 # Words that may precede the command itself, with the options of each that
 # take a separate value.
@@ -262,7 +350,7 @@ _PREFIX_COMMANDS = {
     "timeout": _options("-s --signal -k --kill-after"),
     "stdbuf": _options("-i -o -e --input --output --error"),
     "sudo": _options("-u -g -h -p -C -D -R -T -U --user --group"),
-    "env": _options("-u --unset"),
+    "env": _options("-u --unset -C --chdir -S --split-string"),
 }
 _KEYWORDS = _options("! { } if then else elif fi do done while until")
 
@@ -276,95 +364,141 @@ def _skip_prefixes(words: list[_Word]) -> list[_Word]:
         if _ASSIGNMENT.match(text) or text in _KEYWORDS:
             index += 1
             continue
-        if not word.known or text not in _PREFIX_COMMANDS:
+        name = os.path.basename(text)
+        if not word.known or name not in _PREFIX_COMMANDS:
             break
-        following = {w.text.split("=")[0] for w in words[index + 1 : index + 4]}
-        if text == "command" and following & {"-v", "-V"}:
+        values = _PREFIX_COMMANDS[name]
+        index += 1
+        own_options = set()
+        while index < len(words) and words[index].text.startswith("-") and words[index].text != "-":
+            option = words[index].text
+            index += 1
+            if option == "--":
+                break
+            own_options.add(option.split("=")[0])
+            if option in values:
+                index += 1
+        if name == "command" and own_options & {"-v", "-V"}:
             return []
         # `env -C DIR` and `env -S STRING` change what runs where.
-        if text == "env" and following & {"-C", "--chdir", "-S", "--split-string"}:
+        if name == "env" and own_options & {"-C", "--chdir", "-S", "--split-string"}:
             return []
-        values = _PREFIX_COMMANDS[text]
-        index += 1
-        while index < len(words) and words[index].text.startswith("-") and words[index].text != "-":
-            if words[index].text == "--":
-                index += 1
-                break
-            if words[index].text in values:
-                index += 1
+        if name == "timeout" and index < len(words):
             index += 1
-        if text == "timeout" and index < len(words):
-            index += 1
-        if text == "env":
+        if name == "env":
             while index < len(words) and _ASSIGNMENT.match(words[index].text):
                 index += 1
     return words[index:]
 
 
-def _shell_script(args: list[_Word]) -> str | None:
-    """The script of ``sh -c SCRIPT``, or ``None`` when the shell runs a file or stdin."""
+def _shell_script(args: list[_Word], heredocs: list[str]) -> str | None:
+    """The script a shell runs: ``-c SCRIPT``, or a here-document on its input.
+
+    Returns ``None`` when the shell runs a script file or a script only it knows.
+    """
     index = 0
     has_c = False
     while index < len(args):
         text = args[index].text
-        if text in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file"):
-            index += 2
-            continue
         if text == "--":
             index += 1
             break
+        if text in ("--rcfile", "--init-file"):
+            index += 2
+            continue
         if text.startswith("--"):
             index += 1
             continue
         if len(text) < 2 or text[0] not in "-+":
             break
         has_c = has_c or "c" in text[1:]
-        index += 1
-    if not has_c or index >= len(args) or not args[index].known:
-        return None
-    return args[index].text
+        # `-o NAME` and `-O NAME` take the next word, also at a cluster's end.
+        index += 2 if text[-1] in "oO" else 1
+    if has_c:
+        return args[index].text if index < len(args) and args[index].known else None
+    if index >= len(args) and heredocs:
+        return heredocs[0]
+    return None
 
 
-def _operands(args: list[_Word], values: frozenset[str]) -> list[_Word]:
+def _scan(args: list[_Word], values: frozenset[str]) -> tuple[list[_Word], set[str]]:
+    """Split arguments into operands and the options used.
+
+    Options in ``values`` take a value: the rest of a short option cluster
+    after them, the text after ``=``, or else the next argument. ``--`` ends
+    the options.
+    """
     operands = []
+    used: set[str] = set()
     index = 0
     while index < len(args):
         text = args[index].text
-        if text == "--":
-            operands += args[index + 1 :]
-            break
-        if text.startswith("-") and text != "-" and args[index].known:
-            if "=" not in text and text in values:
-                index += 1
-            index += 1
-            continue
-        operands.append(args[index])
         index += 1
-    return operands
+        if text == "--":
+            operands += args[index:]
+            break
+        if not text.startswith("-") or text == "-":
+            operands.append(args[index - 1])
+            continue
+        if text.startswith("--"):
+            name, equals, _ = text.partition("=")
+            used.add(name)
+            if name in values and not equals:
+                index += 1
+            continue
+        for position, letter in enumerate(text[1:], start=2):
+            option = f"-{letter}"
+            used.add(option)
+            if option in values:
+                if position == len(text):
+                    index += 1
+                break
+    return operands, used
 
 
 def _script_operands(
-    args: list[_Word], values: frozenset[str], script_options: tuple[str, ...], bsd_i: bool = False
+    args: list[_Word],
+    values: frozenset[str],
+    script_options: frozenset[str],
+    *,
+    needs_option: bool = False,
 ) -> list[_Word]:
     """Operands of a command whose first operand is a script or pattern.
 
-    When the script is given by an option such as ``-e``, every operand is a
-    file.
+    When an option gives the script, every operand is a file; otherwise the
+    first operand is the script, or, with ``needs_option``, a script file to
+    run and no operand is read.
     """
-    has_script_option = False
-    kept = []
-    for index, arg in enumerate(args):
-        text = arg.text
-        if any(text == option or text.startswith(option + "=") for option in script_options):
-            has_script_option = True
-        elif text.startswith(("-e", "-f")) and len(text) > 2 and not text.startswith("--"):
-            has_script_option = has_script_option or text[:2] in script_options
-        # BSD sed on macOS spells an in-place edit without backup `-i ''`.
-        if bsd_i and index > 0 and args[index - 1].text == "-i" and text == "":
-            continue
-        kept.append(arg)
-    operands = _operands(kept, values)
-    return operands if has_script_option else operands[1:]
+    # BSD sed on macOS spells an in-place edit without backup `-i ''`.
+    kept = [
+        arg
+        for index, arg in enumerate(args)
+        if not (arg.text == "" and index > 0 and args[index - 1].text == "-i")
+    ]
+    operands, used = _scan(kept, values)
+    if used & script_options:
+        return operands
+    return [] if needs_option else operands[1:]
+
+
+def _jq_files(args: list[_Word]) -> list[_Word]:
+    operands = []
+    from_file = False
+    index = 0
+    while index < len(args):
+        text = args[index].text
+        index += 1
+        if text in ("--args", "--jsonargs"):
+            break
+        if text in _JQ_PAIRS:
+            index += 2
+        elif text.startswith("-") and text != "-":
+            from_file = from_file or text in ("-f", "--from-file")
+            if text in _JQ_VALUES:
+                index += 1
+        else:
+            operands.append(args[index - 1])
+    return operands if from_file else operands[1:]
 
 
 # Lexer ----------------------------------------------------------------------------
@@ -373,28 +507,41 @@ def _script_operands(
 class _Lexer:
     """Split a script into simple commands.
 
-    ``substitutions`` collects the scripts of ``$(...)``, backquotes and
-    process substitutions, which run as commands of their own.
+    With ``stop_at_close``, lexing ends at a ``)`` that no ``(`` in the text
+    opened, whose index is then ``closed_at``: this finds the end of a
+    ``$(...)`` substitution with quotes, comments and here-documents understood.
     """
 
-    def __init__(self, text: str, home: str | None) -> None:
+    def __init__(
+        self,
+        text: str,
+        home: str | None,
+        depth: int,
+        *,
+        start: int = 0,
+        stop_at_close: bool = False,
+    ) -> None:
         self.text = text
         self.home = home
-        self.index = 0
-        self.substitutions: list[str] = []
+        self.depth = depth
+        self.index = start
+        self.stop_at_close = stop_at_close
+        self.closed_at: int | None = None
+        self._current = _Command()
         self._pending_heredocs: list[tuple[str, bool, _Command]] = []
+        self._in_test = False
 
     def commands(self) -> list[_Command]:
         commands: list[_Command] = []
-        current = _Command()
         text = self.text
         length = len(text)
+        parentheses = 0
         while self.index < length:
             char = text[self.index]
             if char == "\n":
                 self.index += 1
                 self._read_heredocs()
-                current = self._end(commands, current, "\n")
+                self._end(commands, "\n")
                 continue
             if char in " \t":
                 self.index += 1
@@ -406,25 +553,48 @@ class _Lexer:
                 end = text.find("\n", self.index)
                 self.index = length if end < 0 else end
                 continue
+            if self._in_test and char in "<>":
+                # Inside `[[ ]]`, `<` and `>` compare strings.
+                self._current.words.append(_Word(char, True))
+                self.index += 1
+                continue
+            if text.startswith("((", self.index):
+                # Arithmetic, where `<` and `>` compare numbers.
+                self.index = _matching_close(text, self.index + 2, "))")
+                self._current.words.append(_Word("((", False))
+                continue
             redirection = self._redirection()
             if redirection is not None:
-                self._redirect(current, redirection)
+                self._redirect(redirection)
                 continue
             operator = next((op for op in _OPERATORS if text.startswith(op, self.index)), None)
             if operator is not None:
+                if operator == ")" and self.stop_at_close and parentheses == 0:
+                    self.closed_at = self.index
+                    break
+                parentheses += {"(": 1, ")": -1}.get(operator, 0)
                 self.index += len(operator)
-                current = self._end(commands, current, operator)
+                self._end(commands, operator)
                 continue
-            current.words.append(self._word())
-        self._end(commands, current, "")
+            word = self._word()
+            self._current.words.append(word)
+            if word.text in ("[[", "]]"):
+                self._in_test = word.text == "[["
+        self._end(commands, "")
         return commands
 
-    def _end(self, commands: list[_Command], current: _Command, separator: str) -> _Command:
-        if current.words or current.redirections or separator in ("(", ")"):
+    def _end(self, commands: list[_Command], separator: str) -> None:
+        current = self._current
+        if (
+            current.words
+            or current.redirections
+            or current.substitutions
+            or separator in ("(", ")")
+        ):
             current.separator = separator
             commands.append(current)
-            return _Command()
-        return current
+            self._current = _Command()
+        self._in_test = False
 
     def _redirection(self) -> str | None:
         text = self.text
@@ -441,10 +611,11 @@ class _Lexer:
                 return operator
         return None
 
-    def _redirect(self, command: _Command, operator: str) -> None:
+    def _redirect(self, operator: str) -> None:
         self._skip_blanks()
         if self.index >= len(self.text) or self.text[self.index] in "\n|&;()<>":
             return
+        command = self._current
         if operator in ("<<", "<<-"):
             start = self.index
             word = self._word()
@@ -484,11 +655,12 @@ class _Lexer:
         parts: list[str] = []
         known = True
         start = self.index
+        brace = ""
         while self.index < length:
             char = text[self.index]
             if char in _WORD_BREAK:
                 if char in "<>" and text.startswith("(", self.index + 1):
-                    self._substitution(self.index + 2, ")")
+                    self._substitution(self.index + 2)
                     known = False
                     continue
                 break
@@ -505,7 +677,7 @@ class _Lexer:
                     parts.append(text[self.index + 1 : self.index + 2])
                 self.index += 2
             elif char == "$":
-                known = self._dollar(parts) and known
+                known = self._dollar(parts, quoted=False) and known
             elif char == "`":
                 self._backquote()
                 known = False
@@ -516,6 +688,13 @@ class _Lexer:
             elif char == "~" and self.index == start:
                 known = self._tilde(parts) and known
             else:
+                # Unquoted `{a,b}` and `{1..3}` expand to several words.
+                if char == "{":
+                    brace = "{"
+                elif brace and (char == "," or text.startswith("..", self.index)):
+                    brace = "{,"
+                elif char == "}" and brace == "{,":
+                    known = False
                 parts.append(char)
                 self.index += 1
         return _Word("".join(parts), known)
@@ -553,7 +732,7 @@ class _Lexer:
                     parts.append(escaped)
                 self.index += 2
             elif char == "$":
-                known = self._dollar(parts) and known
+                known = self._dollar(parts, quoted=True) and known
             elif char == "`":
                 self._backquote()
                 known = False
@@ -562,24 +741,24 @@ class _Lexer:
                 self.index += 1
         return known
 
-    def _dollar(self, parts: list[str]) -> bool:
+    def _dollar(self, parts: list[str], *, quoted: bool) -> bool:
         """Consume a ``$`` expansion and return whether its value is known."""
         text = self.text
         following = text[self.index + 1 : self.index + 2]
         if text.startswith("$((", self.index):
             self.index = _matching_close(text, self.index + 3, "))")
         elif following == "(":
-            self._substitution(self.index + 2, ")")
+            self._substitution(self.index + 2)
         elif following == "{":
             self.index = _matching_close(text, self.index + 2, "}")
-        elif following == "'":
+        elif following == "'" and not quoted:
             self.index = _ansi_c_quoted(text, self.index + 2, parts)
             return True
-        elif following == '"':
+        elif following == '"' and not quoted:
             self.index += 1
             return self._double_quoted(parts)
         elif following.isalnum() or following == "_":
-            match = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]").match(text, self.index + 1)
+            match = _NAME.match(text, self.index + 1)
             self.index = match.end() if match else self.index + 2
         elif following and following in "@*#?$!-":
             self.index += 2
@@ -589,17 +768,24 @@ class _Lexer:
             return True
         return False
 
-    def _substitution(self, start: int, close: str) -> None:
-        end = _matching_close(self.text, start, close)
-        self.substitutions.append(self.text[start : end - len(close)])
-        self.index = end
+    def _substitution(self, start: int) -> None:
+        """Consume a ``$(...)`` or ``<(...)`` whose script starts at ``start``."""
+        if self.depth >= _MAX_DEPTH:
+            self.index = _matching_close(self.text, start, ")")
+            return
+        inner = _Lexer(self.text, self.home, self.depth + 1, start=start, stop_at_close=True)
+        commands = inner.commands()
+        self._current.substitutions.append(commands)
+        self.index = len(self.text) if inner.closed_at is None else inner.closed_at + 1
 
     def _backquote(self) -> None:
         text = self.text
         end = self.index + 1
         while end < len(text) and text[end] != "`":
             end += 2 if text[end] == "\\" else 1
-        self.substitutions.append(text[self.index + 1 : end])
+        if self.depth < _MAX_DEPTH:
+            script = text[self.index + 1 : end]
+            self._current.substitutions.append(_Lexer(script, self.home, self.depth + 1).commands())
         self.index = min(end + 1, len(text))
 
 

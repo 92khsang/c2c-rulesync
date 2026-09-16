@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -245,7 +246,7 @@ def test_redirections(command: str, expected: list[str]) -> None:
         ('cat "$f" ${g} `h` $(i)', []),
         ("cat src/*.ts 'src/[x].ts'", ["/repo/src/[x].ts"]),
         ('cat "$(cat inner.md)"', ["/repo/inner.md"]),
-        ("diff <(cat a.ts) b.ts", ["/repo/a.ts"]),
+        ("diff <(cat a.ts) b.ts", ["/repo/a.ts", "/repo/b.ts"]),
         ("echo `cat c.md`", ["/repo/c.md"]),
     ],
 )
@@ -308,3 +309,106 @@ def test_malformed_commands_do_not_raise(command: str) -> None:
 
 def test_no_home_leaves_tilde_paths_out() -> None:
     assert shell_paths("cat ~/a.md b.md", CWD, None) == ["/repo/b.md"]
+
+
+# Shell: cases found in review ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ('grep -c "^$" a.ts', ["a.ts"]),
+        ('rg -n "def main$" src/a.py && cat b.ts', ["src/a.py", "b.ts"]),
+        ('grep "it$\'s" a.ts; cat b.ts', ["a.ts", "b.ts"]),
+        ("git commit -m \"$(cat <<'EOF'\nfix: don't crash\nEOF\n)\" && cat a.ts", ["a.ts"]),
+        ("echo $(echo x # it's\n) ; cat b.ts", ["b.ts"]),
+        ("echo $(cat a.ts", ["a.ts"]),
+        ('cd sub && echo "$(cat a.ts)"', ["sub/a.ts"]),
+        ("pushd sub && cat a && popd && cat b", ["sub/a", "b"]),
+        ("grep -nC 3 foo a.ts", ["a.ts"]),
+        ("rg -nt ts foo a.ts", ["a.ts"]),
+        ("head -qn 5 a.ts", ["a.ts"]),
+        ("tail -fn 50 app.log", ["app.log"]),
+        ("grep --include=*.ts -rn foo src/a.ts", ["src/a.ts"]),
+        ("rg --dfa-size-limit 1G foo a.ts", ["a.ts"]),
+        ("sed -ne 's/x/y/p' a.ts", ["a.ts"]),
+        ("grep -rne foo a.ts", ["a.ts"]),
+        ("cat src/{a,b}.ts a{1..3}.ts c{d}.ts", ["c{d}.ts"]),
+        ("perl -pi -e 's/a/b/' src/a.ts", ["src/a.ts"]),
+        ("perl -0pi -e 's/a/b/' src/a.ts", ["src/a.ts"]),
+        ("perl script.pl data.txt", []),
+        ("/usr/bin/env bash -lc 'cat a.ts'", ["a.ts"]),
+        ("command grep -v foo a.ts", ["a.ts"]),
+        ("env LC_ALL=C grep -C 2 foo a.ts", ["a.ts"]),
+        ("bash -euo pipefail -c 'cat a.ts'", ["a.ts"]),
+        ("bash <<'EOF'\ncat a.ts\nEOF", ["a.ts"]),
+        ("sh -s <<'EOF'\ncat a.ts\nEOF", ["a.ts"]),
+        ("(( n > 10 ))", []),
+        ("for ((i=0; i<3; i++)); do cat a.ts; done", ["a.ts"]),
+        ("[[ $a > b ]] && cat c.ts", ["c.ts"]),
+        ("(( x = 1 << 2 ))\ncat a.ts", ["a.ts"]),
+        ("less +G a.log", ["a.log"]),
+        ("awk '{print}' FS=, a.csv", ["a.csv"]),
+        ("gawk -i inplace '{print}' a.csv", ["a.csv"]),
+        ("jq . package.json", ["package.json"]),
+        ("jq -r --arg name x '.a' f.json", ["f.json"]),
+        ("jq -n '1'", []),
+        ("diff -u a.ts b.ts", ["a.ts", "b.ts"]),
+    ],
+)
+def test_review_cases(command: str, expected: list[str]) -> None:
+    assert paths(command) == [f"/repo/{path}" for path in expected]
+
+
+def test_git_reads_existing_files_without_a_separator(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.ts").write_text("")
+    (tmp_path / "README.md").write_text("")
+    cwd = str(tmp_path / "src")
+
+    assert shell_paths("git diff main a.ts", cwd, HOME) == [f"{tmp_path}/src/a.ts"]
+    assert shell_paths("git log -p --follow a.ts missing.ts", cwd, HOME) == [f"{tmp_path}/src/a.ts"]
+    assert shell_paths("git show HEAD:README.md", cwd, HOME) == [f"{tmp_path}/README.md"]
+    assert shell_paths("git show HEAD:./a.ts", cwd, HOME) == [f"{tmp_path}/src/a.ts"]
+    assert shell_paths("git show HEAD", cwd, HOME) == []
+
+
+def test_patch_headers_inside_an_update_section_are_only_right_trimmed() -> None:
+    patch = (
+        "*** Begin Patch\n*** Update File: a.ts\n@@\n *** End Patch\n *** Update File: fake.ts\n"
+        "-x\n+y\n*** Update File: b.ts\n*** Move to: c.ts\n@@\n-x\n+y\n*** End Patch"
+    )
+
+    assert patch_paths(patch) == ["a.ts", "b.ts", "c.ts"]
+
+
+def test_patch_lines_split_only_at_line_feeds() -> None:
+    assert patch_paths("*** Begin Patch\n*** Add File: a\x0cb.md\n+x\n*** End Patch") == [
+        "a\x0cb.md"
+    ]
+
+
+def test_directory_path_fields_are_not_trigger_paths(tmp_path: Path) -> None:
+    (tmp_path / "images").mkdir()
+
+    assert touched_paths("view_image", {"path": "images"}, str(tmp_path), HOME) == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"' + '$"' * 2000,
+        "cd a; " * 60_000,
+        "cat a\n" * 300_000,
+        "cd a\x00b && cat c.ts",
+        "$(" * 3000 + "cat a.ts",
+        "`" + "\\`" * 5000,
+    ],
+)
+def test_large_or_odd_commands_stay_fast(command: str) -> None:
+    started = time.monotonic()
+
+    shell_paths(command, CWD, HOME)
+
+    assert time.monotonic() - started < 3

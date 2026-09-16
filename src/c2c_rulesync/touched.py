@@ -26,14 +26,17 @@ def touched_paths(tool_name: str, tool_input: object, cwd: str, home: str | None
         home: The home directory for ``~`` in shell commands, or ``None``.
 
     Returns:
-        Normalized absolute paths without duplicates, in the order they appear.
+        Normalized absolute paths without duplicates: path fields, then the
+        files of the patch or command. Existing directories named by a path
+        field or a command are left out.
     """
     if not isinstance(tool_input, dict):
         return []
     paths = [
-        os.path.normpath(os.path.join(cwd, value))
+        path
         for field in _PATH_FIELDS
         if isinstance(value := tool_input.get(field), str) and value
+        if not os.path.isdir(path := os.path.normpath(os.path.join(cwd, value)))
     ]
     command = tool_input.get("command")
     if isinstance(command, str):

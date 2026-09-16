@@ -22,51 +22,74 @@ Claude Code loads path-scoped rules when it reads a file, including before an
 edit, which its tools require. Codex has no read tool: the model reads files
 with shell commands and edits them with `apply_patch`. c2c-rulesync therefore
 treats the files a tool call reads or writes as read
-(`src/c2c_rulesync/touched.py`). This loads rules for more tool calls than
-Claude Code would, never for fewer.
+(`src/c2c_rulesync/touched.py`). This loads rules for tool calls Claude Code has
+no equivalent for; a shell command it cannot read, described below, loads
+nothing.
+
+What Codex 0.154.0 sends a `PreToolUse` hook is read from its source
+(`openai/codex` tag `rust-v0.154.0`): `Bash` carries only
+`{"command": "<script>"}` (`core/src/tools/handlers/unified_exec/exec_command.rs`),
+`apply_patch` carries the raw patch as `command`
+(`core/src/tools/handlers/apply_patch.rs`), and other tools carry their JSON
+arguments.
 
 ### `apply_patch`
 
 The file of every `*** Add File:`, `*** Update File:` and `*** Delete File:`
 header, and the destination of `*** Move to:`, between `*** Begin Patch` and
-`*** End Patch`. Headers are read after trimming white space, as Codex reads
-them.
+`*** End Patch`. As Codex's patch parser reads them
+(`apply-patch/src/streaming_parser.rs`), lines split at line feeds, and white
+space around a header is ignored, except inside an `*** Update File:` section,
+where an indented header-like line is diff context. Paths resolve against the
+session's working directory; a patch with an `*** Environment ID:` header may
+apply in another environment, which the hook cannot see.
 
 ### `view_image` and other tools
 
 The `path`, `file_path` or `filePath` string of the tool input, for any tool the
-hook is wired to.
+hook is wired to, unless it names an existing directory.
 
 ### Shell commands (`Bash`)
 
 `src/c2c_rulesync/shell.py` splits the command the way a POSIX shell would,
 closely enough to find:
 
-- the file operands of `cat`, `nl`, `head`, `tail`, `less`, `more`, `bat` and
-  `tee`, of `sed`, `awk`, `grep` and `rg` after their script or pattern, and of
-  `git diff`, `git show` and `git log` after `--` (and `git blame`'s file);
+- the file operands of `cat`, `nl`, `head`, `tail`, `less`, `more`, `bat`,
+  `tee` and `diff`; of `sed`, `awk`, `grep`, `rg` and `jq` after their script,
+  pattern or filter; and of `perl` with `-e` or `-E`, as in `perl -pi -e`;
+- for `git diff`, `git show` and `git log`, the paths after `--`, or without
+  `--` the operands that are existing files, as git accepts them; `git blame`'s
+  file; and `git show REV:PATH`, relative to the repository's top level;
 - redirection targets (`<`, `>`, `>>`, `&>` and similar), except `/dev/*`;
 - `apply_patch` run through the shell, with its patch in a here-document or an
   argument;
-- commands inside `bash -c`, `sh -c` and `zsh -c` scripts, `$(...)`, backquotes,
-  `<(...)` and subshells;
+- commands inside `-c` scripts and here-documents of `bash`, `sh`, `zsh`, `dash`
+  and `ksh`, inside `$(...)`, backquotes and `<(...)`, and in subshells;
 - commands behind `env`, `sudo`, `timeout`, `nice`, `nohup`, `time`,
-  `command`, `exec` and variable assignments.
+  `command`, `builtin`, `exec`, `stdbuf` and variable assignments.
 
-`cd` and `pushd` change the directory later relative paths resolve against,
-except inside a subshell, a pipeline or a background command. After `cd` to a
-directory only the shell knows (no argument, `-`, a variable or command output)
-or after `popd`, relative paths are ignored until the next `cd` to a known
-directory. `~` expands to the home directory.
+Options are read per command, including clusters such as `grep -nC 3`, so their
+values are not taken for files.
+
+`cd` changes the directory later relative paths resolve against, except inside
+a subshell, a pipeline or a background command; `pushd` and `popd` keep a stack.
+A substitution resolves against the directory of the command it belongs to.
+After `cd` to a directory only the shell knows (no argument, `-`, a variable or
+command output), or `popd` without a matching `pushd`, relative paths are
+ignored until the next `cd` to a known directory. `~` expands to the home
+directory.
 
 It ignores:
 
 - operands that are existing directories, so `grep -r TODO src` loads nothing
   for `src`, as Claude Code's search tools load nothing;
-- `find`, `ls` and every command not listed above;
-- words the shell would expand: variables, command output, and unquoted `*`,
-  `?` and `[`;
-- here-document bodies other than a patch.
+- `find`, `ls`, `cp`, `mv`, `python` and every command not listed above;
+- words the shell would expand: variables, command output, and unquoted globs
+  (`*`, `?`, `[`) and brace expansions (`{a,b}`, `{1..3}`);
+- here-document bodies other than a patch or a shell script;
+- `<` and `>` inside `(( ))` and `[[ ]]`.
+
+A script is examined up to 20,000 commands and 16 levels of nesting.
 
 Codex runs a command in its tool call's `workdir` when one is given, but does
 not pass `workdir` to hooks, so relative paths resolve against the session's
