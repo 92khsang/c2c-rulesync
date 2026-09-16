@@ -15,6 +15,9 @@
 
 import { writeFileSync } from "node:fs";
 
+// Written out so that no tool in between decodes the escape.
+const U = "\\" + "u";
+
 const HAND_PICKED = [
   // Scalars and plain-scalar edge cases.
   "paths: src/**", "paths: *.ts", "paths: a, b", "paths: src/** # note", "paths: a #b", "paths: a#b",
@@ -72,6 +75,24 @@ const HAND_PICKED = [
   // Documents and line endings.
   "paths: a\n...", "a: b\n...\n", "a: b\n...\nc: d", "%YAML 1.2\n---\npaths: a", "paths: a\r\nother: b",
   "paths: a\r\n", "paths: \"a\"\r\n  - b", "paths:\r\n  - a\r\n  - b\r\n",
+  // Tabs, found by comparing the parser with Bun on mutated documents.
+  "paths:\n  \t- a.md", "a:\n  \tb: c", "a:\n  \t\"b\": c", "a:\n  \t? b", "a:\n  \tb", "a:\n  \t-b",
+  "a:\n  \t[b]", "\tu", "\t\"u\"", "e\n\tc", "l\n\t?", "-\t-", "- \ta: b", "-\t\"a\"", "s:\n\t\na:",
+  "s:\nn:\n\t\na:", "s: 1\nn:\n\t\na:", "s:\nn: 1\n\t\na:", "s:\ne: \"\"\n\t", "e: [x]\n\t",
+  "s: 1\ne: [x]\n\t", "s:\ne: x\n\t", "s:\n\t# c\na:", "s:\nn:\n\t# c\na:", "s:\nn:\n \t\na:",
+  "- s:\n  n:\n\t\n  a:", "a:\n  s:\n\t\n  n:", "s:\nn:\n-\n\t", "s:\nn:\n-\n\t\n-", "- a\n-\n\t\n- c",
+  "e:\ne: ,\n#\n\t", "s:\nb:\n s:\n\t\n  t", "description: d\npaths: \"a\"\n\t\n",
+  "description: d\npaths:\n  - a\n\t\n", "|\n\tc", ">\n\t#", "s: |\n\tc", "s: |\n  a\n\n\tc",
+  "s: |\n  a\n\t", "e: [\"\"]\nb: |\n e\n\t#", ">\nF\n\t#",
+  // Carriage returns, directives and surrogate escapes.
+  "paths: a.md\rb.md", "a: b\rpaths: c", "paths:\r  - a\r  - b", "a: \"b\rc\"", "a: 'b\rc'",
+  "a: |\r  x\r  y", "a: \"b\r\n c\"", "a: 'b\r\n c'", "%YAML 1.2\npaths: a.md", "a: b\n%X\nc: d",
+  `x: "${U}d83d${U}de00.md"`, `x: "${U}d83d.md"`, `x: "${U}de00.md"`, `x: "${U}de00${U}d83d.md"`,
+  "x: \"\\U0000D83D.md\"",
+  // Numbers and brackets.
+  "v: 0x" + "f".repeat(16), "v: 0x" + "f".repeat(17), "v: 0x" + "0".repeat(16) + "1",
+  "v: 0o1" + "7".repeat(21), "v: 0o" + "7".repeat(22), "v: " + "9".repeat(309), "v: " + "1".repeat(5000),
+  "s: ]", "s: }a", "- ]", "s: a]", "b: !\n- a", "b: &x\n- a\nc: *x", "b: !!str\n- a",
 ];
 
 const KEYS = ["paths", "description", "globs"];

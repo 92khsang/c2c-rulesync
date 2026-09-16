@@ -16,6 +16,119 @@ Each behavior is labeled with how it is known:
 | observed | Observed in the installed Claude Code without an end-to-end confirmation. |
 | oracle-confirmed | Recorded from a real Claude Code session through the `InstructionsLoaded` hook, committed under `tests/parity/`. |
 
+## Reading a rule file
+
+`src/c2c_rulesync/frontmatter.py` turns a rule file into an injected body and a
+list of globs, or no globs for a rule that applies unconditionally. Each step
+reproduces Claude Code 2.1.273 (observed); the oracle-confirmed cases are
+listed in `tests/parity/`.
+
+### Front matter
+
+- A leading byte order mark is ignored.
+- Front matter must start at the very first character with `---` followed by
+  white space up to a line break, so `----` does not open it.
+- It closes at the first later `---`, even in the middle of a line:
+  `paths: "x---y"` ends the front matter after `"x`.
+- Without a closing `---` there is no front matter, and the whole file,
+  including its first line, is the body of an unconditional rule.
+
+### YAML and the retry
+
+The front matter is parsed as YAML (see [Parsing front matter YAML](#parsing-front-matter-yaml)).
+If Bun rejects it, Claude Code retries once after two rewrites:
+
+1. Every line of the form `key: value`, whose key uses only letters, `_` and
+   `-`, gets its value double-quoted, escaping `\` and `"`, when the value
+   contains any of `{ } [ ] * & # ! | > % @` or a backtick, or contains `: `.
+   A value already wrapped in matching quotes, or written `[...]` and parsing
+   as a list, is left alone.
+2. Every run of tabs at the start of a line becomes two spaces per tab.
+
+Consequences worth knowing:
+
+- `paths: *.ts` works, because the retry quotes it.
+- A list item `- **/*.ts` is never rewritten, so the retry fails too, and the
+  rule loads for every file. Quote globs that start with `*`.
+- `paths: [**/*.ts]` becomes the single literal glob `[**/*.ts]`, a character
+  class.
+- The retry quotes a whole value, comments included, so once any line forces
+  a retry, `paths: a.md # note` becomes the glob `a.md # note`.
+- A line ending in a carriage return (CRLF files) is never rewritten.
+
+If the retry fails, the front matter is ignored: the rule loads for every file.
+c2c-rulesync does the same and reports a warning. If the YAML uses constructs
+c2c-rulesync does not model, it reads `paths` line by line and warns that the
+result may differ from Claude Code.
+
+### From `paths` to globs
+
+- Only the `paths` key counts; `globs` or `Paths` are ignored.
+- A missing or falsy value (`null`, `""`, `0`, `false`) leaves the rule
+  unconditional. So does a value yielding no glob, such as `[]`, `123` or a
+  mapping.
+- A list is flattened, nested lists included, and non-string items are
+  skipped.
+- Each string is split on commas outside braces, so `paths: src/**, docs/**`
+  gives two globs. The brace depth can go negative, and a stray `}` then
+  disables splitting for the rest of the string.
+- Each piece is trimmed and brace-expanded left to right: `{a,b}{1,2}` gives
+  `a1 a2 b1 b2`, `x{,.bak}` gives `x x.bak`, and `{x}` gives `x`. A rule's
+  expansions share a budget of 1,000 results and 4 MiB; a piece that would
+  exceed it stays unexpanded.
+- One trailing `/**` is removed from each glob, so `src/**` becomes `src`,
+  which matches a directory named `src` at any depth (see
+  [Matching](#matching-paths-globs)).
+- If no glob remains, or every glob is `**`, the rule is unconditional.
+
+### Body
+
+When the body contains `<!--`, Claude Code removes block-level HTML comments
+with marked's lexer, GFM off, and that lexer behaves as marked **15.0.12**
+(observed: the two give identical output on 23,031 bodies). Later releases
+differ: marked 16.4.2 and 17.0.6 disagree with it on about 7% of
+`tests/vectors/marked_comments.json`, for example by keeping link reference
+definitions. The body's line endings become `\n`, and (vector-verified):
+
+- A comment starting a block (up to three spaces of indentation, outside code,
+  lists, block quotes and other HTML blocks) is removed, along with the rest of
+  its last line if JavaScript's `trim()` empties that, and the line breaks
+  after it. `trim()` removes U+FEFF and U+3000 but not U+0085.
+- A comment inside a paragraph line, a list item, a block quote or code stays.
+- An unclosed comment stays.
+- A link reference definition such as `[style]: https://example.com/style`
+  disappears unless it continues a paragraph.
+- A single space or tab ending the body right after a comment line is removed
+  with the comment.
+- A block quote continued by lines without `>` can come out with its text
+  rearranged, because marked rebuilds its raw text from lengths measured in
+  different strings.
+
+`src/c2c_rulesync/markdown_blocks.py` ports marked 15.0.12's block lexer,
+keeping only what decides the raw text of top-level tokens, and spells out the
+JavaScript semantics it relies on: `\s`, `.`, case-insensitive matching and
+UTF-16 lengths. `tests/vectors/marked_comments.json` holds marked 15.0.12's
+output for 58 curated bodies and 3,000 random ones, and the port matches all
+of them. A differential run of 500,000 further generated bodies, built from
+comments, every kind of HTML block, fences, indented code, lists, block quotes,
+headings, link definitions, CRLF and CR line endings and Unicode white space,
+found no difference either.
+
+The one known difference: block quotes nested more than about 490 levels deep
+exceed Python's recursion limit, and the body is then kept unchanged, comments
+included. marked under Bun 1.4.2 handles 4,000 levels.
+
+Speed differs too. marked takes quadratic time on some bodies: 4,000 paragraphs
+each followed by a comment line with trailing text take 79 s under Bun 1.4.2
+(0.3 s under Node.js 24), while the port takes linear time on them. Lazily
+continued nested block quotes stay quadratic in the port: 8,000 of them take 9 s
+in the port and 50 s in marked under Bun 1.4.2.
+
+```bash
+npm install --prefix /tmp/marked-15 marked@15.0.12
+node scripts/gen_comment_vectors.mjs /tmp/marked-15/node_modules/marked tests/vectors/marked_comments.json
+```
+
 ## Parsing front matter YAML
 
 Claude Code parses a rule's front matter with `Bun.YAML.parse` (observed), and
@@ -31,12 +144,26 @@ Bun departs from YAML 1.2 in ways that matter for rules (vector-verified):
 - `paths: {a,b}.ts` is a flow mapping followed by text, and fails.
 - A value containing `: `, such as `description: Rules for: the API`, fails.
 - `012` is the number 12, `0X1F` and `1_000` are strings, and `yes`, `no` and
-  `on` are strings.
-- Tabs used as indentation fail.
+  `on` are strings. A hexadecimal or octal number above 64 bits is a string,
+  and a decimal one too large for a double is infinity.
+- Tabs used as indentation fail, and so does a tab between indentation and a
+  list item or key, as in `paths:\n  \t- a.md`. A blank or comment line
+  starting with a tab also fails in the value of a mapping key that is not the
+  mapping's first, unless the text before it is a plain or block scalar: after
+  `description: d` and `paths: "a"`, a line holding only a tab fails. Claude
+  Code's retry replaces those tabs, so such front matter usually still applies.
+- A lone carriage return breaks lines, so `paths: a.md\rb.md` fails.
+- A directive such as `%YAML 1.2` fails, because front matter cannot hold the
+  `---` that would follow it.
+- `\u` escapes of a surrogate pair form one character; any other surrogate
+  escape fails.
+- A plain value cannot start with `]` or `}`.
 
 The parser answers in one of three ways: a value, "Bun throws", or "not
-modeled" for constructs such as explicit `?` keys and directives. The caller
-treats "not modeled" separately and warns instead of guessing.
+modeled" for constructs such as explicit `?` keys, nesting deeper than Python's
+recursion limit, and quoted scalars broken across lines ending in carriage
+returns. The caller treats "not modeled" separately and warns instead of
+guessing.
 
 `tests/vectors/bun_yaml.json` holds Bun's answers for about 3,500 documents:
 
@@ -45,8 +172,10 @@ treats "not modeled" separately and warns instead of guessing.
 - a seeded corpus of mostly malformed documents held out from calibration.
 
 The parser gives no wrong answer on any of them and declines about 2% as not
-modeled. Nine further held-out corpora of 4,000 documents each, generated with
-other seeds, also produced no wrong answer. Claude Code 2.1.273 embeds Bun
+modeled. Documents generated outside the repository also produced no wrong
+answer: eleven held-out corpora of 4,000 documents each, and 80,000 documents
+derived from all of these by inserting tabs, carriage returns, directives,
+surrogate escapes and large numbers (between 6% and 15% declined). Claude Code 2.1.273 embeds Bun
 1.4.3, which is unpublished; the vectors come from Bun 1.4.2.
 
 ```bash
