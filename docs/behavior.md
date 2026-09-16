@@ -88,7 +88,7 @@ ancestors above the main repository still load.
   record must point back to it; a stale record does not skip anything.
 - For a worktree of a bare repository, the bare repository's directory is the
   main root.
-- An unreadable, oversized or non-regular `.git` or `commondir` file means no
+- An unreadable or non-regular `.git`, `gitdir` or `commondir` file means no
   worktree.
 
 ### Links
