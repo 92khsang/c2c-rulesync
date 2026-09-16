@@ -19,7 +19,11 @@ Each behavior is labeled with how it is known:
 ## Finding rules
 
 `src/c2c_rulesync/rules.py` decides which rule files load and when. Each
-statement is observed in Claude Code 2.1.273 unless labeled otherwise.
+statement is observed in Claude Code 2.1.273. The project-rule behaviors below
+are also oracle-confirmed by the cases in
+[Recorded Claude Code sessions](#recorded-claude-code-sessions), except the
+4 MiB limit and unreadable git files; user rules, and what c2c-rulesync itself
+adds (sorting, warnings, the depth limit), are not.
 
 ### Where rules live
 
@@ -201,6 +205,62 @@ A script is examined up to 20,000 commands and 16 levels of nesting.
 Codex runs a command in its tool call's `workdir` when one is given, but does
 not pass `workdir` to hooks, so relative paths resolve against the session's
 working directory.
+
+## Recorded Claude Code sessions
+
+`tests/parity/` holds what real Claude Code 2.1.273 sessions loaded, and
+`tests/test_parity.py` replays every recording against c2c-rulesync. Statements
+labeled oracle-confirmed in this document are covered by these recordings.
+
+`tests/parity/cases.json` (written by `scripts/gen_parity_cases.py`) describes
+25 cases with 44 probes: a file tree, the directory a session starts in, and the files each
+session reads. `scripts/claude_parity_oracle.py` builds each tree under `/tmp`,
+runs one `claude -p --model haiku` session per probe that may call only the
+Read tool on the probe files, and records the `InstructionsLoaded` hook events:
+which rule files loaded at session start, and which loaded after each read, with
+the reason and the normalized globs. A `CLAUDE.md` in the working directory
+confirms that the hook ran and is left out of the recording.
+
+| Group | What it covers |
+|---|---|
+| G0 | The recording itself. |
+| G1 | Front matter detection, the YAML retry and which `paths` values scope a rule, in 35 rules read against one file; file names that are not UTF-8. |
+| G2 | Comma splitting, brace expansion, trailing `/**`, and invalid and negated globs. |
+| G3 | How globs meet paths: depth, anchoring, case, character classes, dot files, `..` names and non-ASCII names. |
+| G4 | Ancestors, nested directories, files outside the working directory, `--add-dir` directories, reading a rule file, a working directory below the project, and rules shadowed through links. |
+| G5 | Git worktrees: nested in their repository, of a bare repository, and with a stale record. |
+| G6 | Links: to rule files and directories inside and outside the working directory, in ancestors, under a linked `.claude` or `.claude/rules`, broken and cyclic links, reads through links leaving or entering the working directory, the `$PWD` spelling, and case-variant targets. |
+| G8 | A rule loads once per session; reading a rule file by its own path counts, and through a link it does not. |
+
+The recordings compare which files load and with which globs, not the order of
+loads or the text injected: the hook sees neither. The oracle also records a
+probe whose Read fails, so a missing load is not mistaken for a rule; none of
+the recorded reads failed.
+
+One recorded difference is intended: Claude Code loads rules for files in
+`--add-dir` directories, which Codex does not pass to hooks
+(`LAZY_DIVERGENCES` in `tests/test_parity.py`).
+
+Not recorded:
+
+- user rules (`~/.claude/rules`), because the sessions run with project settings
+  only under the developer's own login;
+- a rules directory shared by user and project scope, approved external
+  imports, and the other behaviors described without the oracle-confirmed
+  label.
+
+Recording calls a paid model (the 44 probes reported about $0.60 in September
+2026) and never runs in CI:
+
+```bash
+python3 scripts/gen_parity_cases.py tests/parity/cases.json
+python3 scripts/claude_parity_oracle.py --claude-bin ~/.local/share/claude/versions/2.1.273
+```
+
+The recording stores the SHA-256 of `cases.json`, so a changed case fails the
+replay until it is recorded again; `--only <case id>` records single cases into
+the existing file. A new Claude Code version gets its own
+`claude-code-<version>.json`.
 
 ## Reading a rule file
 

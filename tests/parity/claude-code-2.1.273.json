@@ -1,0 +1,1287 @@
+{
+ "cases": {
+  "G0-smoke": {
+   "probes": {
+    "proj/pkg/probe.txt": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/scoped.md",
+       "globs": [
+        "probe.txt",
+        "a",
+        "b"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/pkg/probe.txt"
+      },
+      {
+       "file": "proj/pkg/.claude/rules/pkg-scoped.md",
+       "globs": [
+        "*.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/pkg/probe.txt"
+      },
+      {
+       "file": "proj/pkg/.claude/rules/pkg-unscoped.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "proj/pkg/probe.txt"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G1-front-matter": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/F06-plain.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F07-star-scalar.md",
+       "globs": [
+        "*zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F09-star-flow.md",
+       "globs": [
+        "[*zz-sentinel.txt",
+        "zz-sentinel.txt]"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F10b-comment.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F12-crlf-list.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F13-bom.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F14-tabs.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F15-brace-scalar.md",
+       "globs": [
+        "zz-sentinel.txt",
+        "q.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F22-double-star-and.md",
+       "globs": [
+        "**",
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F24-nested-list.md",
+       "globs": [
+        "zz-sentinel.txt",
+        "q"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F26-duplicate.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F27-block-scalar.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/F35-description-colon.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "proj/.claude/rules/F01-none.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F02-empty.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F03-unclosed.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F04-dashes-comment.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F05-dashes-value.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F08-star-item.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F11-crlf-star.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F16-brace-item.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F17-capital-key.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F18-null.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F19-empty-string.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F20-empty-list.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F21-double-star.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F23-number.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F25-mapping.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F28-scalar-document.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F29-four-dashes.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F30-blank-first.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/F33-invalid-utf8.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G1-non-utf8-name": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "proj/.claude/rules/ok.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G2-normalization": {
+   "probes": {
+    "proj/zz-dir/x.txt": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/N11-dir.md",
+       "globs": [
+        "zz-dir"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-dir/x.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N12-dir-double.md",
+       "globs": [
+        "zz-dir/**"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-dir/x.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N18-negation.md",
+       "globs": [
+        "*",
+        "!zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-dir/x.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "proj/.claude/rules/N13-slash-globstar.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "proj/zz-sentinel.txt": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/N01-scalar-commas.md",
+       "globs": [
+        "q.txt",
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N02-item-commas.md",
+       "globs": [
+        "q.txt",
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N03-brace-commas.md",
+       "globs": [
+        "zz-sentinel.txt",
+        "q.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N04-bracket-commas.md",
+       "globs": [
+        "[a",
+        "b]x",
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N05-single-brace.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N06-empty-alternative.md",
+       "globs": [
+        "zz-sentinel.txt",
+        "zz-sentinel.bak.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N07-nested-braces.md",
+       "globs": [
+        "zz-sentinel.txt",
+        "q}.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N08-two-groups.md",
+       "globs": [
+        "q-x.txt",
+        "q-sentinel.txt",
+        "zz-x.txt",
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N10-over-budget.md",
+       "globs": [
+        "{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}",
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N15-leading-slash.md",
+       "globs": [
+        "/zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N16-invalid-and-valid.md",
+       "globs": [
+        "[~-!]",
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      },
+      {
+       "file": "proj/.claude/rules/N20-escaped-braces.md",
+       "globs": [
+        "\\zz-sentinel\\.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "proj/.claude/rules/N13-slash-globstar.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G3-matching": {
+   "probes": {
+    "proj/..foo/a.ts": {
+     "lazy": [],
+     "session_start": []
+    },
+    "proj/.config/.env.local": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/P3-config.md",
+       "globs": [
+        ".config"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/.config/.env.local"
+      },
+      {
+       "file": "proj/.claude/rules/P3-env.md",
+       "globs": [
+        ".env*"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/.config/.env.local"
+      },
+      {
+       "file": "proj/.claude/rules/P3-local.md",
+       "globs": [
+        "**/*.local"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/.config/.env.local"
+      }
+     ],
+     "session_start": []
+    },
+    "proj/Docs/\u00c4B.MD": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/P1-docs-deep.md",
+       "globs": [
+        "docs/**/*.md"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/Docs/\u00c4B.MD"
+      },
+      {
+       "file": "proj/.claude/rules/P1-docs-star.md",
+       "globs": [
+        "docs/*.md"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/Docs/\u00c4B.MD"
+      },
+      {
+       "file": "proj/.claude/rules/P1-slash-docs.md",
+       "globs": [
+        "/docs"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/Docs/\u00c4B.MD"
+      },
+      {
+       "file": "proj/.claude/rules/P1-star-md.md",
+       "globs": [
+        "*.md"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/Docs/\u00c4B.MD"
+      },
+      {
+       "file": "proj/.claude/rules/P1-upper.md",
+       "globs": [
+        "DOCS"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/Docs/\u00c4B.MD"
+      },
+      {
+       "file": "proj/.claude/rules/P6-unicode.md",
+       "globs": [
+        "docs/\u00e4b.md"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/Docs/\u00c4B.MD"
+      }
+     ],
+     "session_start": []
+    },
+    "proj/docs/guide/a.md": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/P1-docs-deep.md",
+       "globs": [
+        "docs/**/*.md"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/docs/guide/a.md"
+      },
+      {
+       "file": "proj/.claude/rules/P1-guide.md",
+       "globs": [
+        "guide"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/docs/guide/a.md"
+      },
+      {
+       "file": "proj/.claude/rules/P1-slash-docs.md",
+       "globs": [
+        "/docs"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/docs/guide/a.md"
+      },
+      {
+       "file": "proj/.claude/rules/P1-star-md.md",
+       "globs": [
+        "*.md"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/docs/guide/a.md"
+      },
+      {
+       "file": "proj/.claude/rules/P1-upper.md",
+       "globs": [
+        "DOCS"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/docs/guide/a.md"
+      }
+     ],
+     "session_start": []
+    },
+    "proj/packages/x/src/a.ts": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/P2-any-src.md",
+       "globs": [
+        "**/src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/packages/x/src/a.ts"
+      },
+      {
+       "file": "proj/.claude/rules/P2-packages.md",
+       "globs": [
+        "packages/*/src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/packages/x/src/a.ts"
+      },
+      {
+       "file": "proj/.claude/rules/P2-src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/packages/x/src/a.ts"
+      },
+      {
+       "file": "proj/.claude/rules/P5-any-ts.md",
+       "globs": [
+        "**/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/packages/x/src/a.ts"
+      },
+      {
+       "file": "proj/.claude/rules/P5-star-ts.md",
+       "globs": [
+        "*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/packages/x/src/a.ts"
+      }
+     ],
+     "session_start": []
+    },
+    "proj/src/[slug]/page.tsx": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/P2-src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/[slug]/page.tsx"
+      },
+      {
+       "file": "proj/.claude/rules/P4-escaped.md",
+       "globs": [
+        "src/\\[slug\\]/page.tsx"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/[slug]/page.tsx"
+      },
+      {
+       "file": "proj/.claude/rules/P4-star.md",
+       "globs": [
+        "src/*/page.tsx"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/[slug]/page.tsx"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G4-add-dir": {
+   "probes": {
+    "A/other/src/a.ts --add-dir {root}/A/other": {
+     "lazy": [
+      {
+       "file": "A/.claude/rules/a-other.md",
+       "globs": [
+        "other/src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/other/src/a.ts"
+      }
+     ],
+     "session_start": []
+    },
+    "A/proj2/src/a.ts --add-dir {root}/A/proj2": {
+     "lazy": [
+      {
+       "file": "A/proj2/.claude/rules/x.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/proj2/src/a.ts"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G4-scopes": {
+   "probes": {
+    "A/other/src/a.ts": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/other/src/a.ts --add-dir {root}/A/other": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/proj/pkg/.claude/rules/k-src.md": {
+     "lazy": [
+      {
+       "file": "A/proj/pkg/.claude/rules/k-unscoped.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/.claude/rules/k-src.md"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/proj/pkg/src/a.ts": {
+     "lazy": [
+      {
+       "file": "A/proj/.claude/rules/p-pkg.md",
+       "globs": [
+        "pkg/src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/src/a.ts"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/src/a.ts"
+      },
+      {
+       "file": "A/proj/pkg/.claude/rules/k-src.md",
+       "globs": [
+        "src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/src/a.ts"
+      },
+      {
+       "file": "A/proj/pkg/.claude/rules/k-unscoped.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/src/a.ts"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/proj/pkg/src/a.ts (cwd A/proj/pkg)": {
+     "lazy": [
+      {
+       "file": "A/proj/.claude/rules/p-pkg.md",
+       "globs": [
+        "pkg/src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/src/a.ts"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/src/a.ts"
+      },
+      {
+       "file": "A/proj/pkg/.claude/rules/k-src.md",
+       "globs": [
+        "src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/src/a.ts"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/pkg/.claude/rules/k-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/proj/pkg/sub/x/y.ts": {
+     "lazy": [
+      {
+       "file": "A/proj/pkg/.claude/rules/k-unscoped.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/sub/x/y.ts"
+      },
+      {
+       "file": "A/proj/pkg/sub/.claude/rules/s-ts.md",
+       "globs": [
+        "*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/sub/x/y.ts"
+      },
+      {
+       "file": "A/proj/pkg/sub/.claude/rules/s-unscoped.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/proj/pkg/sub/x/y.ts"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/proj/src/a.ts": {
+     "lazy": [
+      {
+       "file": "A/.claude/rules/a-proj.md",
+       "globs": [
+        "proj/src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/src/a.ts"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/proj/src/a.ts"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/proj2/src/a.ts --add-dir {root}/A/proj2": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/a-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/proj/.claude/rules/p-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G4-shadowing": {
+   "probes": {
+    "A/proj/pkg/src/x.ts": {
+     "lazy": [],
+     "session_start": []
+    },
+    "A/proj/src/a.ts": {
+     "lazy": [],
+     "session_start": []
+    }
+   }
+  },
+  "G5-bare-worktree": {
+   "probes": {
+    "B/wt/probe.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": ".claude/rules/parent.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G5-stale-worktree": {
+   "probes": {
+    "M/.claude/worktrees/w1/f": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": ".claude/rules/parent.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "M/.claude/rules/m-unscoped.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "M/.claude/worktrees/w1/.claude/rules/m-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G5-worktree": {
+   "probes": {
+    "M/.claude/worktrees/w1/src/a.ts": {
+     "lazy": [
+      {
+       "file": "M/.claude/worktrees/w1/.claude/rules/m-src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "M/.claude/worktrees/w1/src/a.ts"
+      }
+     ],
+     "session_start": [
+      {
+       "file": ".claude/rules/parent.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "M/.claude/worktrees/w1/.claude/rules/m-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "M/sub/src/a.ts (cwd M/sub)": {
+     "lazy": [
+      {
+       "file": "M/.claude/rules/m-src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "M/sub/src/a.ts"
+      }
+     ],
+     "session_start": [
+      {
+       "file": ".claude/rules/parent.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "M/.claude/rules/m-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G6-ancestor-link": {
+   "probes": {
+    "A/proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "A/.claude/rules/real.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G6-case-variant-target": {
+   "probes": {
+    "Proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "proj/shared.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G6-claude-dir-link": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [
+      {
+       "file": "outside/.claude/rules/y.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "outside/.claude/rules/x.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G6-claude-dir-link-entries": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "outside/.claude/rules/x.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/shared/in.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G6-file-link": {
+   "probes": {
+    "proj/src/link.ts": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/src.md",
+       "globs": [
+        "src"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/link.ts"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G6-links-entries": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [
+      {
+       "file": "proj/shared/in-scoped.md",
+       "globs": [
+        "zz-sentinel.txt"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/zz-sentinel.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "proj/.claude/rules/broken-sub/b.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/sibling.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/shared-dir/in-dir.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/shared/in-unscoped.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G6-nested-through-link": {
+   "probes": {
+    "proj/link-pkg/a.ts": {
+     "lazy": [
+      {
+       "file": "proj/pkg/.claude/rules/n.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "proj/link-pkg/a.ts"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G6-pwd-spelling": {
+   "probes": {
+    "alias/src/a.ts PWD={root}/alias": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/src.md",
+       "globs": [
+        "src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "alias/src/a.ts"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G6-read-enters-cwd": {
+   "probes": {
+    "alias/src/a.ts+proj/src/a.ts": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/src.md",
+       "globs": [
+        "src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/a.ts"
+      },
+      {
+       "file": "proj/src/.claude/rules/n.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "proj/src/a.ts"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G6-read-leaves-cwd": {
+   "probes": {
+    "proj/ext/a.ts": {
+     "lazy": [],
+     "session_start": []
+    },
+    "proj/src/out.ts+proj/src/in.ts": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/src.md",
+       "globs": [
+        "src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/in.ts"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G6-rules-dir-link": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": []
+    }
+   }
+  },
+  "G6-rules-dir-link-inside": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "proj/docs/in.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/shared-rules/a.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G8-once": {
+   "probes": {
+    "proj/.claude/rules/src.md+proj/src/a.ts": {
+     "lazy": [],
+     "session_start": []
+    },
+    "proj/src/a.ts+proj/src/b.ts": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/src.md",
+       "globs": [
+        "src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/a.ts"
+      }
+     ],
+     "session_start": []
+    }
+   }
+  },
+  "G8-rule-read-through-link": {
+   "probes": {
+    "proj/.claude/rules/alias.md+proj/src/a.ts": {
+     "lazy": [
+      {
+       "file": "proj/.claude/rules/md.md",
+       "globs": [
+        "*.md"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/.claude/rules/alias.md"
+      },
+      {
+       "file": "proj/shared/s.md",
+       "globs": [
+        "src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "proj/src/a.ts"
+      }
+     ],
+     "session_start": []
+    },
+    "proj/.claude/rules/md.md": {
+     "lazy": [],
+     "session_start": []
+    }
+   }
+  }
+ },
+ "cases_sha256": "378704b2bfbb17e7986b9b18d595acb589808fb5a63470476c7164b619261453",
+ "claude_code": "2.1.273"
+}

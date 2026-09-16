@@ -1,0 +1,971 @@
+{
+ "cases": [
+  {
+   "id": "G0-smoke",
+   "group": "G0",
+   "cwd": "proj",
+   "tree": {
+    "proj/.claude/rules/scoped.md": "---\npaths: [\"probe.txt\", \"{a,b}/**\"]\n---\n\nG0 cwd scoped\n",
+    "proj/pkg/.claude/rules/pkg-unscoped.md": "G0 nested unscoped\n",
+    "proj/pkg/.claude/rules/pkg-scoped.md": "---\npaths:\n  - \"*.txt\"\n---\n\nG0 nested scoped\n",
+    "proj/pkg/probe.txt": "probe\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/pkg/probe.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G1-front-matter",
+   "group": "G1",
+   "cwd": "proj",
+   "tree": {
+    "proj/.claude/rules/F01-none.md": "F01 no front matter\n",
+    "proj/.claude/rules/F02-empty.md": "---\n---\nF02 empty front matter\n",
+    "proj/.claude/rules/F03-unclosed.md": "---\npaths: zz-sentinel.txt\nF03 unclosed\n",
+    "proj/.claude/rules/F04-dashes-comment.md": "---\n# -----\npaths: zz-sentinel.txt\n---\nF04 early close\n",
+    "proj/.claude/rules/F05-dashes-value.md": "---\npaths: \"zz-sentinel.txt---x\"\n---\nF05 dashes in value\n",
+    "proj/.claude/rules/F06-plain.md": "---\npaths: zz-sentinel.txt\n---\n\nF06 plain\n",
+    "proj/.claude/rules/F07-star-scalar.md": "---\npaths: *zz-sentinel.txt\n---\n\nF07 star scalar\n",
+    "proj/.claude/rules/F08-star-item.md": "---\npaths:\n  - *zz-sentinel.txt\n---\n\nF08 star list item\n",
+    "proj/.claude/rules/F09-star-flow.md": "---\npaths: [*zz-sentinel.txt, zz-sentinel.txt]\n---\n\nF09 star flow list\n",
+    "proj/.claude/rules/F10-comment-quoted.md": "---\ndescription: *x\npaths: zz-sentinel.txt # note\n---\n\nF10 comment swallowed\n",
+    "proj/.claude/rules/F10b-comment.md": "---\ndescription: plain\npaths: zz-sentinel.txt # note\n---\n\nF10b comment\n",
+    "proj/.claude/rules/F11-crlf-star.md": "---\r\npaths: *zz-sentinel.txt\r\n---\r\nF11 crlf star\r\n",
+    "proj/.claude/rules/F12-crlf-list.md": "---\r\npaths:\r\n  - zz-sentinel.txt\r\n---\r\nF12 crlf list\r\n",
+    "proj/.claude/rules/F13-bom.md": "\ufeff---\npaths: zz-sentinel.txt\n---\nF13 bom\n",
+    "proj/.claude/rules/F14-tabs.md": "---\npaths:\n\t- zz-sentinel.txt\n---\nF14 tabs\n",
+    "proj/.claude/rules/F15-brace-scalar.md": "---\npaths: {zz-sentinel,q}.txt\n---\n\nF15 brace scalar\n",
+    "proj/.claude/rules/F16-brace-item.md": "---\npaths:\n  - {zz-sentinel,q}.txt\n---\n\nF16 brace item\n",
+    "proj/.claude/rules/F17-capital-key.md": "---\nPaths: zz-sentinel.txt\n---\n\nF17 capital key\n",
+    "proj/.claude/rules/F18-null.md": "---\npaths:\n---\n\nF18 null\n",
+    "proj/.claude/rules/F19-empty-string.md": "---\npaths: \"\"\n---\n\nF19 empty string\n",
+    "proj/.claude/rules/F20-empty-list.md": "---\npaths: []\n---\n\nF20 empty list\n",
+    "proj/.claude/rules/F21-double-star.md": "---\npaths: [\"**\"]\n---\n\nF21 double star\n",
+    "proj/.claude/rules/F22-double-star-and.md": "---\npaths: [\"**\", \"zz-sentinel.txt\"]\n---\n\nF22 double star and sentinel\n",
+    "proj/.claude/rules/F23-number.md": "---\npaths: 123\n---\n\nF23 number\n",
+    "proj/.claude/rules/F24-nested-list.md": "---\npaths: [zz-sentinel.txt, 5, [q]]\n---\n\nF24 nested list\n",
+    "proj/.claude/rules/F25-mapping.md": "---\npaths: {a: zz-sentinel.txt}\n---\n\nF25 mapping\n",
+    "proj/.claude/rules/F26-duplicate.md": "---\npaths: q\npaths: zz-sentinel.txt\n---\n\nF26 duplicate key\n",
+    "proj/.claude/rules/F27-block-scalar.md": "---\npaths: |\n  zz-sentinel.txt\n---\n\nF27 block scalar\n",
+    "proj/.claude/rules/F28-scalar-document.md": "---\nzz\n---\nF28 scalar document\n",
+    "proj/.claude/rules/F29-four-dashes.md": "----\npaths: zz-sentinel.txt\n---\nF29 four dashes\n",
+    "proj/.claude/rules/F30-blank-first.md": "\n---\npaths: zz-sentinel.txt\n---\nF30 blank first line\n",
+    "proj/.claude/rules/F31-empty-body.md": "---\npaths: zz-sentinel.txt\n---\n\n",
+    "proj/.claude/rules/F32-comment-body.md": "---\npaths: zz-sentinel.txt\n---\n<!-- only a comment -->\n",
+    "proj/.claude/rules/F34-upper.MD": "---\npaths: zz-sentinel.txt\n---\nF34 upper extension\n",
+    "proj/.claude/rules/F35-description-colon.md": "---\ndescription: Rules for: the API\npaths: zz-sentinel.txt\n---\n\nF35 colon in description\n",
+    "proj/.claude/rules/F33-invalid-utf8.md": {
+     "base64": "RjMzIGludmFsaWQg/yB1dGY4Cg=="
+    },
+    "proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G2-normalization",
+   "group": "G2",
+   "cwd": "proj",
+   "tree": {
+    "proj/.claude/rules/N01-scalar-commas.md": "---\npaths: q.txt, zz-sentinel.txt\n---\n\nN01 scalar commas\n",
+    "proj/.claude/rules/N02-item-commas.md": "---\npaths: [\"q.txt, zz-sentinel.txt\"]\n---\n\nN02 item commas\n",
+    "proj/.claude/rules/N03-brace-commas.md": "---\npaths: \"{zz-sentinel,q}.txt\"\n---\n\nN03 brace commas\n",
+    "proj/.claude/rules/N04-bracket-commas.md": "---\npaths: \"[a,b]x, zz-sentinel.txt\"\n---\n\nN04 bracket commas\n",
+    "proj/.claude/rules/N05-single-brace.md": "---\npaths: \"{zz-sentinel}.txt\"\n---\n\nN05 single alternative\n",
+    "proj/.claude/rules/N06-empty-alternative.md": "---\npaths: \"zz-sentinel{,.bak}.txt\"\n---\n\nN06 empty alternative\n",
+    "proj/.claude/rules/N07-nested-braces.md": "---\npaths: \"{zz-{sentinel,q}}.txt\"\n---\n\nN07 nested braces\n",
+    "proj/.claude/rules/N08-two-groups.md": "---\npaths: \"{q,zz}-{x,sentinel}.txt\"\n---\n\nN08 two groups\n",
+    "proj/.claude/rules/N09-stray-brace.md": "---\npaths: \"q}, zz-sentinel.txt\"\n---\n\nN09 stray closing brace\n",
+    "proj/.claude/rules/N10-over-budget.md": "---\npaths: [\"{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}\", \"zz-sentinel.txt\"]\n---\n\nN10 over budget\n",
+    "proj/.claude/rules/N11-dir.md": "---\npaths: \"zz-dir/**\"\n---\n\nN11 directory\n",
+    "proj/.claude/rules/N12-dir-double.md": "---\npaths: \"zz-dir/**/**\"\n---\n\nN12 directory double globstar\n",
+    "proj/.claude/rules/N13-slash-globstar.md": "---\npaths: \"/**\"\n---\n\nN13 slash globstar\n",
+    "proj/.claude/rules/N14-dot-slash.md": "---\npaths: \"./zz-sentinel.txt\"\n---\n\nN14 dot slash\n",
+    "proj/.claude/rules/N15-leading-slash.md": "---\npaths: \"/zz-sentinel.txt\"\n---\n\nN15 leading slash\n",
+    "proj/.claude/rules/N16-invalid-and-valid.md": "---\npaths: [\"[~-!]\", \"zz-sentinel.txt\"]\n---\n\nN16 invalid and valid\n",
+    "proj/.claude/rules/N17-only-invalid.md": "---\npaths: [\"[~-!]\"]\n---\n\nN17 only invalid\n",
+    "proj/.claude/rules/N18-negation.md": "---\npaths: [\"*\", \"!zz-sentinel.txt\"]\n---\n\nN18 negation\n",
+    "proj/.claude/rules/N19-lone-negation.md": "---\npaths: [\"!zz-sentinel.txt\"]\n---\n\nN19 lone negation\n",
+    "proj/.claude/rules/N20-escaped-braces.md": "---\npaths: '\\{zz-sentinel\\}.txt'\n---\n\nN20 escaped braces\n",
+    "proj/zz-sentinel.txt": "sentinel\n",
+    "proj/zz-dir/x.txt": "x\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    },
+    {
+     "read": [
+      "proj/zz-dir/x.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G3-matching",
+   "group": "G3",
+   "cwd": "proj",
+   "tree": {
+    "proj/.claude/rules/P1-star-md.md": "---\npaths: \"*.md\"\n---\n\nP1-star-md.md\n",
+    "proj/.claude/rules/P1-docs-star.md": "---\npaths: \"docs/*.md\"\n---\n\nP1-docs-star.md\n",
+    "proj/.claude/rules/P1-docs-deep.md": "---\npaths: \"docs/**/*.md\"\n---\n\nP1-docs-deep.md\n",
+    "proj/.claude/rules/P1-slash-docs.md": "---\npaths: \"/docs\"\n---\n\nP1-slash-docs.md\n",
+    "proj/.claude/rules/P1-guide.md": "---\npaths: \"guide\"\n---\n\nP1-guide.md\n",
+    "proj/.claude/rules/P1-upper.md": "---\npaths: \"DOCS/**\"\n---\n\nP1-upper.md\n",
+    "proj/.claude/rules/P2-src.md": "---\npaths: \"src/**\"\n---\n\nP2-src.md\n",
+    "proj/.claude/rules/P2-src-ts.md": "---\npaths: \"src/*.ts\"\n---\n\nP2-src-ts.md\n",
+    "proj/.claude/rules/P2-any-src.md": "---\npaths: \"**/src/*.ts\"\n---\n\nP2-any-src.md\n",
+    "proj/.claude/rules/P2-packages.md": "---\npaths: \"packages/*/src/*.ts\"\n---\n\nP2-packages.md\n",
+    "proj/.claude/rules/P3-env.md": "---\npaths: \".env*\"\n---\n\nP3-env.md\n",
+    "proj/.claude/rules/P3-local.md": "---\npaths: \"**/*.local\"\n---\n\nP3-local.md\n",
+    "proj/.claude/rules/P3-config.md": "---\npaths: \".config\"\n---\n\nP3-config.md\n",
+    "proj/.claude/rules/P4-class.md": "---\npaths: \"src/[slug]/page.tsx\"\n---\n\nP4-class.md\n",
+    "proj/.claude/rules/P4-escaped.md": "---\npaths: 'src/\\[slug\\]/page.tsx'\n---\n\nP4-escaped.md\n",
+    "proj/.claude/rules/P4-star.md": "---\npaths: \"src/*/page.tsx\"\n---\n\nP4-star.md\n",
+    "proj/.claude/rules/P5-any-ts.md": "---\npaths: \"**/*.ts\"\n---\n\nP5-any-ts.md\n",
+    "proj/.claude/rules/P5-star-ts.md": "---\npaths: \"*.ts\"\n---\n\nP5-star-ts.md\n",
+    "proj/.claude/rules/P6-unicode.md": "---\npaths: \"docs/\u00e4b.md\"\n---\n\nP6-unicode.md\n",
+    "proj/docs/guide/a.md": "probe\n",
+    "proj/packages/x/src/a.ts": "probe\n",
+    "proj/.config/.env.local": "probe\n",
+    "proj/src/[slug]/page.tsx": "probe\n",
+    "proj/..foo/a.ts": "probe\n",
+    "proj/Docs/\u00c4B.MD": "probe\n"
+   },
+   "requires": [
+    "posix_names"
+   ],
+   "probes": [
+    {
+     "read": [
+      "proj/docs/guide/a.md"
+     ]
+    },
+    {
+     "read": [
+      "proj/packages/x/src/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "proj/.config/.env.local"
+     ]
+    },
+    {
+     "read": [
+      "proj/src/[slug]/page.tsx"
+     ]
+    },
+    {
+     "read": [
+      "proj/..foo/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "proj/Docs/\u00c4B.MD"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G4-scopes",
+   "group": "G4",
+   "cwd": "A/proj",
+   "tree": {
+    "A/.claude/rules/a-unscoped.md": "G4 ancestor unscoped\n",
+    "A/.claude/rules/a-proj.md": "---\npaths: \"proj/src/**\"\n---\n\nG4 ancestor proj/src\n",
+    "A/.claude/rules/a-src.md": "---\npaths: \"src/*.ts\"\n---\n\nG4 ancestor src\n",
+    "A/proj/.claude/rules/p-unscoped.md": "G4 cwd unscoped\n",
+    "A/proj/.claude/rules/p-src.md": "---\npaths: \"src/**\"\n---\n\nG4 cwd src\n",
+    "A/proj/.claude/rules/p-pkg.md": "---\npaths: \"pkg/src/*.ts\"\n---\n\nG4 cwd pkg\n",
+    "A/proj/pkg/.claude/rules/k-unscoped.md": "G4 pkg unscoped\n",
+    "A/proj/pkg/.claude/rules/k-src.md": "---\npaths: \"src/*.ts\"\n---\n\nG4 pkg src\n",
+    "A/proj/pkg/sub/.claude/rules/s-unscoped.md": "G4 sub unscoped\n",
+    "A/proj/pkg/sub/.claude/rules/s-ts.md": "---\npaths: \"*.ts\"\n---\n\nG4 sub ts\n",
+    "A/proj/pkg/src/a.ts": "",
+    "A/proj/src/a.ts": "",
+    "A/proj/pkg/sub/x/y.ts": "",
+    "A/other/src/a.ts": "",
+    "A/proj2/src/a.ts": ""
+   },
+   "probes": [
+    {
+     "read": [
+      "A/proj/pkg/src/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "A/proj/src/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "A/proj/pkg/sub/x/y.ts"
+     ]
+    },
+    {
+     "read": [
+      "A/other/src/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "A/other/src/a.ts"
+     ],
+     "args": [
+      "--add-dir",
+      "{root}/A/other"
+     ]
+    },
+    {
+     "read": [
+      "A/proj2/src/a.ts"
+     ],
+     "args": [
+      "--add-dir",
+      "{root}/A/proj2"
+     ]
+    },
+    {
+     "read": [
+      "A/proj/pkg/.claude/rules/k-src.md"
+     ]
+    },
+    {
+     "read": [
+      "A/proj/pkg/src/a.ts"
+     ],
+     "cwd": "A/proj/pkg"
+    }
+   ]
+  },
+  {
+   "id": "G5-worktree",
+   "group": "G5",
+   "cwd": "M/.claude/worktrees/w1",
+   "requires": [
+    "git"
+   ],
+   "tree": {
+    ".claude/rules/parent.md": "G5 parent unscoped\n",
+    "M/.claude/rules/m-unscoped.md": "G5 main unscoped\n",
+    "M/.claude/rules/m-src.md": "---\npaths: \"src/**\"\n---\n\nG5 main src\n",
+    "M/src/a.ts": "",
+    "M/sub/src/a.ts": ""
+   },
+   "setup": [
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "init",
+      "-q"
+     ]
+    },
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "-c",
+      "user.email=oracle@example.com",
+      "-c",
+      "user.name=oracle",
+      "add",
+      "."
+     ]
+    },
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "-c",
+      "user.email=oracle@example.com",
+      "-c",
+      "user.name=oracle",
+      "commit",
+      "-q",
+      "-m",
+      "init"
+     ]
+    },
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "worktree",
+      "add",
+      "-q",
+      ".claude/worktrees/w1"
+     ]
+    }
+   ],
+   "probes": [
+    {
+     "read": [
+      "M/.claude/worktrees/w1/src/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "M/sub/src/a.ts"
+     ],
+     "cwd": "M/sub"
+    }
+   ]
+  },
+  {
+   "id": "G6-links-entries",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/shared/in-unscoped.md": "G6 linked in-cwd unscoped\n",
+    "proj/shared/in-scoped.md": "---\npaths: \"zz-sentinel.txt\"\n---\n\nG6 linked in-cwd scoped\n",
+    "proj/.claude/rules/sibling.md": "G6 sibling\n",
+    "outside/out-unscoped.md": "G6 linked outside unscoped\n",
+    "outside/out-scoped.md": "---\npaths: \"zz-sentinel.txt\"\n---\n\nG6 linked outside scoped\n",
+    "proj/shared-dir/in-dir.md": "G6 linked dir in-cwd\n",
+    "outside/dir/out-dir.md": "G6 linked dir outside\n",
+    "proj/.claude/rules/broken-sub/b.md": "G6 beside broken link\n",
+    "proj/.claude/rules/l-in-unscoped.md": {
+     "symlink": "../../shared/in-unscoped.md"
+    },
+    "proj/.claude/rules/l-in-scoped.md": {
+     "symlink": "../../shared/in-scoped.md"
+    },
+    "proj/.claude/rules/l-sibling.md": {
+     "symlink": "sibling.md"
+    },
+    "proj/.claude/rules/l-out-unscoped.md": {
+     "symlink": "../../../outside/out-unscoped.md"
+    },
+    "proj/.claude/rules/l-out-scoped.md": {
+     "symlink": "../../../outside/out-scoped.md"
+    },
+    "proj/.claude/rules/l-in-dir": {
+     "symlink": "../../shared-dir"
+    },
+    "proj/.claude/rules/l-out-dir": {
+     "symlink": "../../../outside/dir"
+    },
+    "proj/.claude/rules/loop": {
+     "symlink": "."
+    },
+    "proj/.claude/rules/broken-sub/broken.md": {
+     "symlink": "missing.md"
+    },
+    "proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-rules-dir-link",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "outside/rules/x.md": "G6 rules dir linked outside\n",
+    "proj/.claude/rules": {
+     "symlink": "../../outside/rules"
+    },
+    "proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-claude-dir-link",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "outside/.claude/rules/x.md": "G6 .claude linked outside\n",
+    "outside/.claude/rules/y.md": "---\npaths: \"zz-sentinel.txt\"\n---\n\nG6 .claude linked outside scoped\n",
+    "proj/.claude": {
+     "symlink": "../outside/.claude"
+    },
+    "proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-ancestor-link",
+   "group": "G6",
+   "cwd": "A/proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "A/shared.md": "G6 ancestor linked file\n",
+    "A/.claude/rules/real.md": "G6 ancestor real\n",
+    "A/.claude/rules/alias.md": {
+     "symlink": "../../shared.md"
+    },
+    "A/proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "A/proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-file-link",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/.claude/rules/lib.md": "---\npaths: \"lib/**\"\n---\n\nG6 lib\n",
+    "proj/.claude/rules/src.md": "---\npaths: \"src/**\"\n---\n\nG6 src\n",
+    "proj/lib/real.ts": "",
+    "proj/src/link.ts": {
+     "symlink": "../lib/real.ts"
+    }
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/src/link.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G8-once",
+   "group": "G8",
+   "cwd": "proj",
+   "tree": {
+    "proj/.claude/rules/src.md": "---\npaths: \"src/*.ts\"\n---\n\nG8 src\n",
+    "proj/src/a.ts": "",
+    "proj/src/b.ts": ""
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/src/a.ts",
+      "proj/src/b.ts"
+     ]
+    },
+    {
+     "read": [
+      "proj/.claude/rules/src.md",
+      "proj/src/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-claude-dir-link-entries",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "outside/.claude/rules/x.md": "G6b regular file in linked .claude\n",
+    "elsewhere/out.md": "G6b linked outside cwd\n",
+    "elsewhere/out-scoped.md": "---\npaths: \"zz-sentinel.txt\"\n---\n\nG6b linked outside cwd scoped\n",
+    "proj/shared/in.md": "G6b linked inside cwd\n",
+    "outside/.claude/rules/l-out.md": {
+     "symlink": "../../../elsewhere/out.md"
+    },
+    "outside/.claude/rules/l-out-scoped.md": {
+     "symlink": "../../../elsewhere/out-scoped.md"
+    },
+    "outside/.claude/rules/l-in.md": {
+     "symlink": "../../../proj/shared/in.md"
+    },
+    "proj/.claude": {
+     "symlink": "../outside/.claude"
+    },
+    "proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-rules-dir-link-inside",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/shared-rules/a.md": "G6c regular file in linked rules dir\n",
+    "proj/docs/in.md": "G6c linked inside cwd\n",
+    "outside/out.md": "G6c linked outside cwd\n",
+    "proj/shared-rules/l-in.md": {
+     "symlink": "../docs/in.md"
+    },
+    "proj/shared-rules/l-out.md": {
+     "symlink": "../../outside/out.md"
+    },
+    "proj/.claude/rules": {
+     "symlink": "../shared-rules"
+    },
+    "proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-nested-through-link",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/pkg/.claude/rules/n.md": "G6d nested unscoped\n",
+    "outside/out.md": "G6d nested entry linked outside cwd\n",
+    "proj/pkg/.claude/rules/l-out.md": {
+     "symlink": "../../../../outside/out.md"
+    },
+    "proj/pkg/a.ts": "",
+    "proj/link-pkg": {
+     "symlink": "pkg"
+    }
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/link-pkg/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-read-leaves-cwd",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/.claude/rules/ext.md": "---\npaths: \"ext/*.ts\"\n---\n\nG6e ext\n",
+    "proj/.claude/rules/src.md": "---\npaths: \"src/*.ts\"\n---\n\nG6e src\n",
+    "outside/a.ts": "",
+    "outside/.claude/rules/n.md": "G6e nested rules outside cwd\n",
+    "proj/ext": {
+     "symlink": "../outside"
+    },
+    "proj/src/out.ts": {
+     "symlink": "../../outside/a.ts"
+    },
+    "proj/src/in.ts": ""
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/ext/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "proj/src/out.ts",
+      "proj/src/in.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-read-enters-cwd",
+   "group": "G6",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/.claude/rules/src.md": "---\npaths: \"src/*.ts\"\n---\n\nG6f src\n",
+    "proj/src/.claude/rules/n.md": "G6f nested unscoped\n",
+    "proj/src/a.ts": "",
+    "alias": {
+     "symlink": "proj"
+    }
+   },
+   "probes": [
+    {
+     "read": [
+      "alias/src/a.ts",
+      "proj/src/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G8-rule-read-through-link",
+   "group": "G8",
+   "cwd": "proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/shared/s.md": "---\npaths: \"src/*.ts\"\n---\n\nG8b shared scoped\n",
+    "proj/.claude/rules/alias.md": {
+     "symlink": "../../shared/s.md"
+    },
+    "proj/.claude/rules/md.md": "---\npaths: \"*.md\"\n---\n\nG8b matches its own path\n",
+    "proj/src/a.ts": ""
+   },
+   "probes": [
+    {
+     "read": [
+      "proj/.claude/rules/alias.md",
+      "proj/src/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "proj/.claude/rules/md.md"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G4-shadowing",
+   "group": "G4",
+   "cwd": "A/proj",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "A/proj/.claude/rules/y.md": "---\npaths: \"src/*.ts\"\n---\n\nG4b cwd rule linked from the ancestor\n",
+    "A/.claude/rules/l.md": {
+     "symlink": "../../proj/.claude/rules/y.md"
+    },
+    "A/proj/.claude/rules/s.md": "---\npaths: \"pkg/src/*.ts\"\n---\n\nG4b cwd rule linked from a nested dir\n",
+    "A/proj/pkg/.claude/rules/l.md": {
+     "symlink": "../../../.claude/rules/s.md"
+    },
+    "A/proj/src/a.ts": "",
+    "A/proj/pkg/src/x.ts": ""
+   },
+   "probes": [
+    {
+     "read": [
+      "A/proj/src/a.ts"
+     ]
+    },
+    {
+     "read": [
+      "A/proj/pkg/src/x.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G4-add-dir",
+   "group": "G4",
+   "cwd": "A/proj",
+   "tree": {
+    "A/.claude/rules/a-other.md": "---\npaths: \"other/src/*.ts\"\n---\n\nG4c ancestor rule for an added dir\n",
+    "A/proj2/.claude/rules/x.md": "G4c sibling with the cwd as a string prefix\n",
+    "A/proj/.keep": "",
+    "A/other/src/a.ts": "",
+    "A/proj2/src/a.ts": ""
+   },
+   "probes": [
+    {
+     "read": [
+      "A/other/src/a.ts"
+     ],
+     "args": [
+      "--add-dir",
+      "{root}/A/other"
+     ]
+    },
+    {
+     "read": [
+      "A/proj2/src/a.ts"
+     ],
+     "args": [
+      "--add-dir",
+      "{root}/A/proj2"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G5-bare-worktree",
+   "group": "G5",
+   "cwd": "B/wt",
+   "requires": [
+    "git"
+   ],
+   "tree": {
+    ".claude/rules/parent.md": "G5b parent unscoped\n",
+    "src/.keep": ""
+   },
+   "setup": [
+    {
+     "cwd": "src",
+     "run": [
+      "git",
+      "init",
+      "-q"
+     ]
+    },
+    {
+     "cwd": "src",
+     "run": [
+      "git",
+      "-c",
+      "user.email=oracle@example.com",
+      "-c",
+      "user.name=oracle",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "init"
+     ]
+    },
+    {
+     "cwd": ".",
+     "run": [
+      "git",
+      "clone",
+      "-q",
+      "--bare",
+      "src",
+      "B"
+     ]
+    },
+    {
+     "cwd": "B",
+     "run": [
+      "git",
+      "worktree",
+      "add",
+      "-q",
+      "wt"
+     ]
+    },
+    {
+     "cwd": "B",
+     "run": [
+      "sh",
+      "-c",
+      "mkdir -p .claude/rules && printf 'G5b bare repository dir\\n' > .claude/rules/b.md"
+     ]
+    },
+    {
+     "cwd": "B/wt",
+     "run": [
+      "sh",
+      "-c",
+      "printf 'probe\\n' > probe.txt"
+     ]
+    }
+   ],
+   "probes": [
+    {
+     "read": [
+      "B/wt/probe.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G5-stale-worktree",
+   "group": "G5",
+   "cwd": "M/.claude/worktrees/w1",
+   "requires": [
+    "git"
+   ],
+   "tree": {
+    ".claude/rules/parent.md": "G5c parent unscoped\n",
+    "M/.claude/rules/m-unscoped.md": "G5c main unscoped\n",
+    "M/f": ""
+   },
+   "setup": [
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "init",
+      "-q"
+     ]
+    },
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "-c",
+      "user.email=oracle@example.com",
+      "-c",
+      "user.name=oracle",
+      "add",
+      "."
+     ]
+    },
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "-c",
+      "user.email=oracle@example.com",
+      "-c",
+      "user.name=oracle",
+      "commit",
+      "-q",
+      "-m",
+      "init"
+     ]
+    },
+    {
+     "cwd": "M",
+     "run": [
+      "git",
+      "worktree",
+      "add",
+      "-q",
+      ".claude/worktrees/w1"
+     ]
+    },
+    {
+     "cwd": "M",
+     "run": [
+      "sh",
+      "-c",
+      "printf '/nonexistent/w1/.git\\n' > .git/worktrees/w1/gitdir"
+     ]
+    }
+   ],
+   "probes": [
+    {
+     "read": [
+      "M/.claude/worktrees/w1/f"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-case-variant-target",
+   "group": "G6",
+   "cwd": "Proj",
+   "requires": [
+    "symlink",
+    "case_sensitive_fs"
+   ],
+   "tree": {
+    "proj/shared.md": "G6g target in a case-variant sibling\n",
+    "Proj/.claude/rules/l.md": {
+     "symlink": "../../../proj/shared.md"
+    },
+    "Proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "probes": [
+    {
+     "read": [
+      "Proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G1-non-utf8-name",
+   "group": "G1",
+   "cwd": "proj",
+   "requires": [
+    "posix_names"
+   ],
+   "tree": {
+    "proj/.claude/rules/ok.md": "G1b control\n",
+    "proj/zz-sentinel.txt": "sentinel\n"
+   },
+   "setup": [
+    {
+     "cwd": "proj/.claude/rules",
+     "run": [
+      "python3",
+      "-c",
+      "import os; open(b'\\xff.md', 'w').write('G1b non-UTF-8 file name\\n'); os.mkdir(b'd\\xfe'); open(b'd\\xfe/in.md', 'w').write('G1b inside non-UTF-8 dir\\n')"
+     ]
+    }
+   ],
+   "probes": [
+    {
+     "read": [
+      "proj/zz-sentinel.txt"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "G6-pwd-spelling",
+   "group": "G6",
+   "cwd": "alias",
+   "requires": [
+    "symlink"
+   ],
+   "tree": {
+    "proj/.claude/rules/src.md": "---\npaths: \"src/*.ts\"\n---\n\nG6h src\n",
+    "proj/src/a.ts": "",
+    "alias": {
+     "symlink": "proj"
+    }
+   },
+   "probes": [
+    {
+     "read": [
+      "alias/src/a.ts"
+     ],
+     "env": {
+      "PWD": "{root}/alias"
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -10,8 +10,9 @@ Codex under the conditions Claude Code 2.1.273 loads them. It is a Python port o
   code must run on the `requires-python` floor.
 - Glob matching reproduces node-ignore 7.0.5 as Claude Code 2.1.273 runs it, quirks included. Do
   not replace it with `fnmatch`, `pathlib` or a git-semantics library, and do not "fix" a quirk.
-- Generated files (`tests/vectors/*.json`, `src/c2c_rulesync/_js_case.py`) change only by
-  rerunning their script, and a behavior change updates `docs/behavior.md` in the same PR.
+- Generated files (`tests/vectors/*.json`, `tests/parity/*.json`, `src/c2c_rulesync/_js_case.py`)
+  change only by rerunning their script, and a behavior change updates `docs/behavior.md` in the
+  same PR.
 - Do not copy code, regular expressions, or minified identifiers from the Claude Code binary.
   Describe Claude Code behavior as observed results, and cite public URLs, upstream commits, or
   committed test data.
@@ -30,6 +31,8 @@ node scripts/gen_ignore_vectors.mjs tests/vectors/node_ignore_7_0_5.json   # net
 bun scripts/gen_js_case_classes.mjs src/c2c_rulesync/_js_case.py         # Bun runtime
 bun scripts/gen_yaml_vectors.mjs tests/vectors/bun_yaml.json               # Bun runtime
 node scripts/gen_comment_vectors.mjs <marked 15.0.12 dir> tests/vectors/marked_comments.json
+python3 scripts/gen_parity_cases.py tests/parity/cases.json
+python3 scripts/claude_parity_oracle.py --claude-bin <claude 2.1.273> [--only <case id>]  # paid
 ```
 
 ## Contributing
@@ -38,6 +41,8 @@ Branch from `main` as `<type>/<slug>`. Commit messages and PR titles follow Conv
 wire the template with `git config commit.template .gitmessage`. Fill
 `.github/pull_request_template.md` with the commands you actually ran. `main` is protected: an agent
 may open a PR and squash-merge it once the `ci-ok` check is green, and never pushes to `main`.
+`scripts/claude_parity_oracle.py` and `scripts/codex_e2e.py` call paid models with the developer's
+login: ask before running them.
 
 ## Pointers
 
