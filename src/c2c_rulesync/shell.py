@@ -594,6 +594,9 @@ class _Lexer:
             current.separator = separator
             commands.append(current)
             self._current = _Command()
+            if len(commands) >= _MAX_COMMANDS:
+                # Nothing past this point would be examined.
+                self.index = len(self.text)
         self._in_test = False
 
     def _redirection(self) -> str | None:

@@ -398,12 +398,12 @@ def test_directory_path_fields_are_not_trigger_paths(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        '"' + '$"' * 2000,
-        "cd a; " * 60_000,
-        "cat a\n" * 300_000,
-        "cd a\x00b && cat c.ts",
-        "$(" * 3000 + "cat a.ts",
-        "`" + "\\`" * 5000,
+        pytest.param('"' + '$"' * 2000, id="dollar-quotes"),
+        pytest.param("cd a; " * 60_000, id="long-cd-chain"),
+        pytest.param("cat a\n" * 300_000, id="many-commands"),
+        pytest.param("cd a\x00b && cat c.ts", id="nul"),
+        pytest.param("$(" * 3000 + "cat a.ts", id="nested-substitutions"),
+        pytest.param("`" + "\\`" * 5000, id="escaped-backquotes"),
     ],
 )
 def test_large_or_odd_commands_stay_fast(command: str) -> None:
