@@ -18,6 +18,9 @@ rules and leaves no state.
 
 With ``C2C_RULESYNC_LOCAL_INSTRUCTIONS=1``, ``CLAUDE.local.md`` files are
 delivered with the rules, where Claude Code's ``local`` setting source loads them.
+
+Files matched by the ``claudeMdExcludes`` patterns of Claude Code's user
+settings file are not delivered, unless ``C2C_RULESYNC_CLAUDE_MD_EXCLUDES=0``.
 """
 
 from __future__ import annotations
@@ -26,10 +29,14 @@ import contextlib
 import os
 import time
 from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 
 from c2c_rulesync.payload import Payload, parse_payload
 from c2c_rulesync.state import LockTimeout, State, ThreadState, state_root, sweep
 from c2c_rulesync.touched import touched_paths
+
+if TYPE_CHECKING:
+    from c2c_rulesync.excludes import Excludes
 
 __all__ = ["run_hook"]
 
@@ -117,11 +124,13 @@ def _inject(
     from c2c_rulesync.rules import RuleFinder, SessionRules
 
     # Discovery runs before taking the lock, which parallel tool calls share.
+    config_dir = _config_dir(environ, cwd, home)
     finder = RuleFinder(
         cwd,
-        _user_rules_dir(environ, cwd, home),
+        _user_rules_dir(environ, config_dir),
         local_instructions=environ.get("C2C_RULESYNC_LOCAL_INSTRUCTIONS") == "1",
         home=home,
+        excludes=_user_excludes(environ, config_dir),
     )
     start_rules = None if start_known_done else finder.session_start_rules()
     triggered = []
@@ -198,15 +207,29 @@ def _unchanged(old: State, new: State) -> bool:
     return (old.start_done, old.loaded, old.warned) == (new.start_done, new.loaded, new.warned)
 
 
-def _user_rules_dir(environ: Mapping[str, str], cwd: str, home: str | None) -> str | None:
-    """Claude Code's user rules directory, or ``None`` when user rules are turned off."""
-    if environ.get("C2C_RULESYNC_USER_RULES") == "0":
-        return None
+def _config_dir(environ: Mapping[str, str], cwd: str, home: str | None) -> str | None:
+    """Claude Code's configuration directory, or ``None`` when it cannot be known."""
     config = environ.get("CLAUDE_CONFIG_DIR", "")
     if config:
         if config == "~" or config.startswith("~/"):
             if home is None:
                 return None
             config = home + config[1:]
-        return os.path.join(cwd, config, "rules")
-    return None if home is None else os.path.join(home, ".claude", "rules")
+        return os.path.join(cwd, config)
+    return None if home is None else os.path.join(home, ".claude")
+
+
+def _user_rules_dir(environ: Mapping[str, str], config_dir: str | None) -> str | None:
+    """Claude Code's user rules directory, or ``None`` when user rules are turned off."""
+    if environ.get("C2C_RULESYNC_USER_RULES") == "0" or config_dir is None:
+        return None
+    return os.path.join(config_dir, "rules")
+
+
+def _user_excludes(environ: Mapping[str, str], config_dir: str | None) -> Excludes | None:
+    """The ``claudeMdExcludes`` of Claude Code's user settings file, unless turned off."""
+    if environ.get("C2C_RULESYNC_CLAUDE_MD_EXCLUDES") == "0" or config_dir is None:
+        return None
+    from c2c_rulesync.excludes import load_excludes
+
+    return load_excludes(os.path.join(config_dir, "settings.json"))

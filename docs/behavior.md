@@ -25,7 +25,8 @@ are also oracle-confirmed by the cases in
 [Recorded Claude Code sessions](#recorded-claude-code-sessions), except the
 4 MiB limit and unreadable git files; user rules, and what c2c-rulesync itself
 adds (sorting, warnings, the depth limit), are not. `CLAUDE.local.md` files are
-described in [Local instructions](#local-instructions-claudelocalmd).
+described in [Local instructions](#local-instructions-claudelocalmd), and files
+that settings leave out in [Excluded files](#excluded-files-claudemdexcludes).
 
 ### Where rules live
 
@@ -91,7 +92,9 @@ directory, reading a `.py` file loaded both
 `~/.claude-extra/rules/comments-python.md` and
 `~/.claude/rules/comments-python.md`, and the rules without `paths:` in
 `~/.claude/rules` were listed as project instructions. c2c-rulesync tells rule
-files apart by resolved path and does the same.
+files apart by resolved path and does the same. A `claudeMdExcludes` pattern in
+the user settings file can leave them out
+([Excluded files](#excluded-files-claudemdexcludes)).
 
 A rule file is skipped when its body is empty after front matter and comments
 are removed, or when it is larger than 4 MiB (c2c-rulesync warns). Invalid
@@ -200,6 +203,90 @@ What c2c-rulesync decides itself:
 - `CLAUDE.md` files are not delivered: they usually import `AGENTS.md`, which
   Codex 0.154.0 loads by itself.
 
+### Excluded files (`claudeMdExcludes`)
+
+Claude Code skips a memory file whose absolute path matches a glob pattern of
+the `claudeMdExcludes` setting. The setting works in user, project, local and
+managed settings, the lists of all of them apply, and managed `CLAUDE.md` files
+cannot be excluded
+([documented](https://code.claude.com/docs/en/memory#exclude-specific-claude-md-files)).
+The pattern syntax is not documented. The G10 recordings show, for Claude Code
+2.1.273 with the patterns in the working directory's `.claude/settings.json`
+(oracle-confirmed):
+
+- An excluded rule loads neither at session start, nor as a rule of a directory
+  a read passes, nor as a rule whose `paths:` match a read. An excluded
+  `CLAUDE.local.md` loads neither at session start nor after a read. The files
+  no pattern matches still load.
+- A pattern is compared with the whole absolute path, case-sensitively. The
+  relative patterns `a.md` and `.claude/rules/a.md` matched nothing, and `~/`
+  is not expanded.
+- `*` matches within one path segment. `**` as a whole segment matches any
+  number of segments, none included; inside a segment, as in `a**.md`, it acts
+  as `*`. Both match names that start with a dot, so `/home/me/**` covers
+  `/home/me/.claude/rules`.
+- A pattern naming a directory, with or without a trailing `/`, does not exclude
+  the files in it; `<directory>/**` does.
+- `?` matches one character. `{a,b}`, nested braces and integer ranges such as
+  `{1..3}` expand. `[ab]`, `[a-c]` and `[^a]` match one character, and `!` in a
+  bracket expression is an ordinary member, so `[!a]` matches `a`.
+- A rule file reached through a link is excluded by a pattern matching either
+  its path under the rules directory, whether the file, a directory below the
+  rules directory or `.claude/rules` itself is the link, or its resolved path. A
+  `CLAUDE.local.md` that is a link is excluded only by its own path, which
+  Claude Code reports, not by the file it leads to.
+- A pattern written through a linked directory, such as
+  `/alias/.claude/rules/a.md` when `/alias` links to the working directory
+  `/real`, excludes `/real/.claude/rules/a.md`. A pattern naming a link to a
+  rule file does not exclude that file where it is reached by its own path.
+- An excluded file does not count as processed: in the layout of G4-shadowing, a
+  working-directory rule first reached through an excluded link in a nested
+  directory still loads when its globs match the read.
+- A list with an entry that is not a string excludes nothing.
+
+What c2c-rulesync decides itself:
+
+- It reads the patterns only from the user settings file,
+  `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`, found as the
+  user rules directory is; project, local and managed settings and `--settings`
+  are not read. Patterns are assumed to match there as they did in project
+  settings, which the recordings cannot show. `C2C_RULESYNC_CLAUDE_MD_EXCLUDES=0`
+  turns the setting off; `C2C_RULESYNC_USER_RULES=0` does not.
+- User rules are excluded like project rules (documented for user memory files,
+  not recorded).
+- The settings file is read on every hook call. A file a thread already
+  received is not taken back, so a changed list takes effect for later
+  deliveries, and for the session start rules after compaction.
+- Only the syntax above is supported. A pattern that uses anything else is not
+  applied, so that it never hides a file Claude Code would load, and
+  c2c-rulesync warns: a leading `!`, a backslash, parentheses or `|` as in
+  extglobs, a `.`, `..` or empty segment, also where braces produce one, an
+  unmatched brace or `]`, an empty, unclosed or reversed bracket expression or
+  one holding `[`, `/`, `{`, `}` or `,`, braces that are neither a comma list nor
+  an integer range, an empty brace alternative, braces nested more than 16 deep,
+  or more than 4,096 characters.
+- Generalizing the recorded relative patterns, a pattern or brace alternative
+  that starts with neither `/` nor a whole `**` segment, such as `*/a.md` or
+  `**a.md`, is not applied, with a warning.
+- Forms the recordings do not show are matched the usual way: `-` at either end
+  of a bracket expression is a member, a range such as `{3..-1}` counts down,
+  `?` and bracket expressions match a leading dot as `*` does, a trailing `/**`
+  also matches the path before it, and the leading directories of a pattern
+  with wildcards, such as `/alias/**/a.md`, are resolved through links too.
+- At most 1,000 patterns, and 256 KiB of them, after brace expansion apply, and
+  warnings name at most 10 patterns.
+- A settings file that is not valid JSON (a byte order mark and `NaN` included),
+  not an object, larger than 2 MiB or unreadable, or whose `claudeMdExcludes` is
+  not a list of strings, excludes nothing, with a warning. The other keys are
+  not checked, so a file whose other values Claude Code rejects still has its
+  `claudeMdExcludes` applied. Claude Code reports such a file as a settings
+  error, skips it in `-p` sessions and offers to continue without it in
+  interactive ones ([documented](https://code.claude.com/docs/en/settings)).
+- An excluded file raises no warning, even one that could not be read, or a
+  broken link whose path or target a pattern matches. Warnings about a rules
+  directory itself, unreadable or nested too deeply, remain.
+- The same matching applies on every platform; the recordings are from Linux.
+
 ### Not implemented
 
 Claude Code also loads instructions that c2c-rulesync does not bring to Codex:
@@ -215,7 +302,8 @@ Claude Code also loads instructions that c2c-rulesync does not bring to Codex:
 - `@path` imports inside rule files and `CLAUDE.local.md` files;
 - rules linked from outside the working directory after a project approved
   external imports in Claude Code, which then load at session start;
-- `claudeMdExcludes` settings.
+- `claudeMdExcludes` in project, local and managed settings and in `--settings`,
+  which can leave out files c2c-rulesync delivers.
 
 ## Which tool calls load rules
 
@@ -434,8 +522,10 @@ version and model, September 2026), the same checks passed: the setting leaves
 sessions that have a transcript their rules.
 
 It uses the developer's Codex login and configuration, including their own
-hooks, and never runs in CI. Compaction, subagents, side conversations and
-`CLAUDE.local.md` files are not exercised.
+hooks, and never runs in CI. It turns user rules and `claudeMdExcludes` off, so
+the developer's own Claude Code configuration does not change the result.
+Compaction, subagents, side conversations, `CLAUDE.local.md` files and
+`claudeMdExcludes` are not exercised.
 
 ### Output
 
@@ -455,7 +545,7 @@ does not limit the size of the injected rules.
 labeled oracle-confirmed in this document are covered by these recordings.
 
 `tests/parity/cases.json` (written by `scripts/gen_parity_cases.py`) describes
-30 cases with 52 probes: a file tree, the directory a session starts in, and the
+36 cases with 60 probes: a file tree, the directory a session starts in, and the
 files each session reads. `scripts/claude_parity_oracle.py` builds each tree
 under `/tmp`, runs one `claude -p --model haiku` session per probe that may call
 only the Read tool on the probe files, and records the `InstructionsLoaded` hook
@@ -464,7 +554,10 @@ with the reason and the normalized globs. A `CLAUDE.md` in the working directory
 confirms that the hook ran and is left out of the recording. Sessions run with
 `--setting-sources project`; a probe's `setting_sources` replaces that. All G9
 probes but one add `local`; the remaining one records that no `CLAUDE.local.md`
-loads without it.
+loads without it. G10 cases put `claudeMdExcludes` in the working directory's
+`.claude/settings.json`, the only settings file such a session reads, with
+`{root}` in the file standing for the case root; the replay passes those
+patterns to c2c-rulesync's matcher.
 
 | Group | What it covers |
 |---|---|
@@ -477,6 +570,7 @@ loads without it.
 | G6 | Links: to rule files and directories inside and outside the working directory, in ancestors, under a linked `.claude` or `.claude/rules`, broken and cyclic links, reads through links leaving or entering the working directory, the `$PWD` spelling, and case-variant targets. |
 | G8 | A rule loads once per session; reading a rule file by its own path counts, and through a link it does not. |
 | G9 | `CLAUDE.local.md`: the `local` setting source, ancestor, working-directory, nested and intermediate files, files outside the working directory, empty files, `.claude/CLAUDE.local.md`, a read of the file by its own path, `paths:` front matter, imports, links and a nested git worktree. |
+| G10 | `claudeMdExcludes`: rules and `CLAUDE.local.md` files at session start and after reads, `*`, `**` and dot names, relative, directory and case-variant patterns, `?`, braces, ranges and bracket expressions, links to files and directories, patterns written through links, a processed file behind an excluded link, a non-string entry, and `~`. |
 
 The recordings compare which files load and with which globs, not the order of
 loads or the text injected: the hook sees neither. The oracle also records a
@@ -499,10 +593,14 @@ Not recorded:
   imports, and the other behaviors described without the oracle-confirmed
   label;
 - `CLAUDE.local.md` at the filesystem root, over 4 MiB or with invalid UTF-8,
-  after compaction, and with imports from outside the working directory.
+  after compaction, and with imports from outside the working directory;
+- `claudeMdExcludes` in user, local or managed settings, lists from several
+  settings files, invalid JSON, syntax beyond the G10 patterns, and matching on
+  macOS or Windows.
 
-Recording calls a paid model (the first 44 probes reported about $0.60, and the
-8 G9 probes $0.12, in September 2026) and never runs in CI:
+Recording calls a paid model (the first 44 probes reported about $0.60, the 8 G9
+probes $0.12, and the 8 G10 probes $0.11, in September 2026) and never runs in
+CI:
 
 ```bash
 python3 scripts/gen_parity_cases.py tests/parity/cases.json

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from c2c_rulesync.excludes import Excludes
 from c2c_rulesync.rules import LOCAL, PROJECT, USER, Rule, RuleFinder, SessionRules
 
 
@@ -694,3 +695,185 @@ def test_front_matter_of_local_instructions_raises_no_warning(tree: Path) -> Non
 
     assert names(finder.session_start_rules(), tree) == ["CLAUDE.local.md"]
     assert finder.warnings == []
+
+
+# claudeMdExcludes -----------------------------------------------------------------
+
+
+def excluding(tree: Path, *patterns: str) -> Excludes:
+    root = os.path.realpath(tree)
+    return Excludes([pattern.replace("{root}", root) for pattern in patterns], "settings.json")
+
+
+def test_excluded_rules_load_neither_at_session_start_nor_after_a_read(tree: Path) -> None:
+    write(
+        tree,
+        {
+            ".claude/rules/outer.md": UNSCOPED,
+            "proj/.claude/rules/cwd.md": UNSCOPED,
+            "proj/.claude/rules/kept.md": UNSCOPED,
+            "proj/.claude/rules/scoped.md": scoped("src/*.ts"),
+            "proj/.claude/rules/scoped-kept.md": scoped("src/*.ts"),
+            "proj/src/.claude/rules/nested.md": UNSCOPED,
+            "proj/src/.claude/rules/nested-scoped.md": scoped("*.ts"),
+            "proj/src/a.ts": "",
+            "user/mine.md": UNSCOPED,
+            "user/mine-scoped.md": scoped("src/*.ts"),
+        },
+    )
+    excludes = excluding(
+        tree,
+        "{root}/.claude/rules/*.md",
+        "{root}/proj/.claude/rules/{cwd,scoped}.md",
+        "**/src/.claude/rules/**",
+        "{root}/user/mine*.md",
+    )
+    finder = RuleFinder(str(tree / "proj"), str(tree / "user"), excludes=excludes)
+
+    assert names(finder.session_start_rules(), tree) == ["proj/.claude/rules/kept.md"]
+    assert names(finder.trigger_rules(str(tree / "proj/src/a.ts")), tree) == [
+        "proj/.claude/rules/scoped-kept.md"
+    ]
+    assert finder.warnings == []
+
+
+def test_excluded_local_instructions_do_not_load(tree: Path) -> None:
+    write(tree, LOCAL_TREE)
+    excludes = excluding(tree, "{root}/CLAUDE.local.md", "{root}/proj/pkg/CLAUDE.local.md")
+    finder = RuleFinder(
+        str(tree / "proj"), user_rules_dir=None, local_instructions=True, excludes=excludes
+    )
+
+    assert names(finder.session_start_rules(), tree) == [
+        ".claude/rules/outer.md",
+        "proj/.claude/rules/a.md",
+        "proj/CLAUDE.local.md",
+    ]
+    assert names(finder.trigger_rules(str(tree / "proj/pkg/sub/x.ts")), tree) == [
+        "proj/pkg/sub/CLAUDE.local.md"
+    ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_a_linked_rule_is_excluded_by_its_path_under_the_rules_directory_or_its_target(
+    tree: Path,
+) -> None:
+    write(
+        tree,
+        {
+            "proj/.claude/rules/kept.md": UNSCOPED,
+            "proj/shared/by-link.md": UNSCOPED,
+            "proj/shared/by-target.md": UNSCOPED,
+            "proj/shared-dir/in-dir.md": UNSCOPED,
+            "proj/shared-dir/in-dir-kept.md": UNSCOPED,
+            "linked/rules-real/through-link.md": UNSCOPED,
+            "linked/rules-real/through-link-kept.md": UNSCOPED,
+        },
+    )
+    rules = tree / "proj/.claude/rules"
+    (rules / "l-by-link.md").symlink_to("../../shared/by-link.md")
+    (rules / "l-by-target.md").symlink_to("../../shared/by-target.md")
+    (rules / "l-dir").symlink_to("../../shared-dir")
+    (tree / "linked/.claude").mkdir()
+    (tree / "linked/.claude/rules").symlink_to("../rules-real")
+    excludes = excluding(
+        tree,
+        "{root}/proj/.claude/rules/l-by-link.md",
+        "{root}/proj/shared/by-target.md",
+        "{root}/proj/.claude/rules/l-dir/in-dir.md",
+        "{root}/linked/.claude/rules/through-link.md",
+    )
+
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, excludes=excludes)
+    assert names(finder.session_start_rules(), tree) == [
+        "proj/.claude/rules/kept.md",
+        "proj/shared-dir/in-dir-kept.md",
+    ]
+    finder = RuleFinder(str(tree / "linked"), user_rules_dir=None, excludes=excludes)
+    assert names(finder.session_start_rules(), tree) == ["linked/rules-real/through-link-kept.md"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_a_linked_local_instructions_file_is_excluded_only_by_its_link(tree: Path) -> None:
+    write(tree, {"outer-target.md": "Outer.\n", "proj-target.md": "Project.\n"})
+    (tree / "proj").mkdir()
+    (tree / "CLAUDE.local.md").symlink_to("outer-target.md")
+    (tree / "proj/CLAUDE.local.md").symlink_to("../proj-target.md")
+    excludes = excluding(tree, "{root}/CLAUDE.local.md", "{root}/proj-target.md")
+    finder = RuleFinder(
+        str(tree / "proj"), user_rules_dir=None, local_instructions=True, excludes=excludes
+    )
+
+    assert names(finder.session_start_rules(), tree) == ["proj/CLAUDE.local.md"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_an_excluded_link_leaves_the_file_it_leads_to_loadable(tree: Path) -> None:
+    write(tree, {"proj/.claude/rules/shadow.md": scoped("pkg/src/*.ts"), "proj/pkg/src/x.ts": ""})
+    (tree / "proj/pkg/.claude/rules").mkdir(parents=True)
+    (tree / "proj/pkg/.claude/rules/l.md").symlink_to("../../../.claude/rules/shadow.md")
+    read = str(tree / "proj/pkg/src/x.ts")
+
+    # Reached first through the nested link, whose globs do not match, the rule
+    # counts as processed and the working directory's copy does not load.
+    assert RuleFinder(str(tree / "proj"), user_rules_dir=None).trigger_rules(read) == []
+    excludes = excluding(tree, "{root}/proj/pkg/.claude/rules/l.md")
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, excludes=excludes)
+    assert names(finder.trigger_rules(read), tree) == ["proj/.claude/rules/shadow.md"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_excluded_files_raise_no_warnings(tree: Path) -> None:
+    write(
+        tree,
+        {
+            "proj/.claude/rules/bad-yaml.md": "---\n%YAML 1.2\npaths: a.md\n---\nBad.\n",
+            "proj/CLAUDE.local.md": "See @notes.md\n",
+            "proj/notes.md": "Notes.\n",
+            "proj/pkg/a.txt": "",
+        },
+    )
+    (tree / "proj/.claude/rules/big.md").write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+    (tree / "proj/.claude/rules/bad-utf8.md").write_bytes(b"\xff\n")
+    (tree / "proj/.claude/rules/broken.md").symlink_to("missing.md")
+    (tree / "proj/.claude/rules/sub").mkdir()
+    (tree / "proj/.claude/rules/sub/dangling.md").symlink_to("../../../gone/target.md")
+    (tree / "proj/pkg/CLAUDE.local.md").symlink_to("missing.md")
+
+    def warnings(excludes: Excludes | None) -> list[str]:
+        finder = RuleFinder(
+            str(tree / "proj"), user_rules_dir=None, local_instructions=True, excludes=excludes
+        )
+        finder.session_start_rules()
+        finder.trigger_rules(str(tree / "proj/pkg/a.txt"))
+        return finder.warnings
+
+    unexcluded = " ".join(warnings(None))
+    for name in (
+        "bad-yaml.md",
+        "big.md",
+        "bad-utf8.md",
+        "broken.md",
+        "dangling.md",
+        "pkg/CLAUDE.local.md",
+    ):
+        assert name in unexcluded
+    assert "@notes.md" in unexcluded
+    excludes = excluding(
+        tree,
+        "{root}/proj/.claude/rules/*.md",
+        "{root}/proj/gone/target.md",
+        "{root}/proj/**/CLAUDE.local.md",
+    )
+    assert warnings(excludes) == []
+
+
+def test_the_warnings_of_the_patterns_come_first(tree: Path) -> None:
+    write(tree, {"proj/.claude/rules/bad-yaml.md": "---\n%YAML 1.2\npaths: a.md\n---\nBad.\n"})
+    excludes = Excludes(["relative.md"], "settings.json")
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, excludes=excludes)
+
+    finder.session_start_rules()
+
+    assert finder.warnings[0] == excludes.warnings[0]
+    assert len(finder.warnings) == 2

@@ -20,7 +20,10 @@ never run in CI. Project-level cases only: the developer's own user-level
 rules and settings are excluded with ``--setting-sources project``. A probe's
 ``setting_sources`` replaces that value: all G9 probes but one add ``local`` so
 that Claude Code loads CLAUDE.local.md files, and the remaining one records that
-none load without it.
+none load without it. G10 cases record ``claudeMdExcludes`` from a project
+``.claude/settings.json`` in the tree, the only settings file such a session
+reads; ``{root}`` in a file's text, as in a probe's arguments and environment,
+stands for the case root.
 
 Usage:
     python3 scripts/claude_parity_oracle.py --claude-bin ~/.local/share/claude/versions/2.1.273
@@ -165,6 +168,9 @@ def requirement_met(requirement: str) -> bool:
         return shutil.which("git") is not None
     if requirement in ("symlink", "posix_names"):
         return os.name == "posix"
+    if requirement == "claude_config_dir":
+        # A probe that moves HOME keeps the login only in an explicit config directory.
+        return os.path.isabs(os.environ.get("CLAUDE_CONFIG_DIR", ""))
     if requirement == "case_sensitive_fs":
         with tempfile.TemporaryDirectory(dir="/tmp") as directory:
             (Path(directory) / "a").touch()
@@ -202,7 +208,7 @@ def build_tree(root: Path, case: dict[str, Any]) -> None:
         elif isinstance(content, dict) and "base64" in content:
             path.write_bytes(base64.b64decode(content["base64"]))
         else:
-            path.write_text(content, encoding="utf-8", newline="")
+            path.write_text(content.replace("{root}", str(root)), encoding="utf-8", newline="")
     for command in case.get("setup", []):
         subprocess.run(
             command["run"], cwd=root / command.get("cwd", "."), check=True, capture_output=True

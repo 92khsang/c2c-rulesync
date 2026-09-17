@@ -255,6 +255,253 @@
     }
    }
   },
+  "G10-excludes-home": {
+   "probes": {
+    "H/work/lit/a.py (cwd H/work/lit)": {
+     "lazy": [
+      {
+       "file": "H/.claude/rules/comments-python.md",
+       "globs": [
+        "**/*.py"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "H/work/lit/a.py"
+      },
+      {
+       "file": "H/work/.claude/rules/py.md",
+       "globs": [
+        "**/*.py"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "H/work/lit/a.py"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "H/work/.claude/rules/keep.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "H/work/proj/src/a.py": {
+     "lazy": [
+      {
+       "file": "H/work/.claude/rules/py.md",
+       "globs": [
+        "**/*.py"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "H/work/proj/src/a.py"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "H/work/.claude/rules/keep.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G10-excludes-links": {
+   "probes": {
+    "P/proj/pkg/src/x.ts --setting-sources project,local": {
+     "lazy": [
+      {
+       "file": "P/proj/.claude/rules/shadow.md",
+       "globs": [
+        "pkg/src/*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "P/proj/pkg/src/x.ts"
+      },
+      {
+       "file": "P/proj/pkg/.claude/rules/pkg-kept.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "P/proj/pkg/src/x.ts"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "P/proj/.claude/rules/kept.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "P/proj/CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "P/proj/shared-dir/dir-kept.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "Q/zz-sentinel.txt (cwd Q)": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "Q/rules-real/x-kept.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G10-excludes-patterns": {
+   "probes": {
+    "A/B/proj/nest/x.txt+A/B/proj/cond/x.py+A/B/proj/packages/web/x.txt --setting-sources project,local": {
+     "lazy": [
+      {
+       "file": "A/B/proj/cond/.claude/rules/cond-kept.md",
+       "globs": [
+        "*.py"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Project",
+       "trigger": "A/B/proj/cond/x.py"
+      },
+      {
+       "file": "A/B/proj/cond/CLAUDE.local.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Local",
+       "trigger": "A/B/proj/cond/x.py"
+      },
+      {
+       "file": "A/B/proj/nest/.claude/rules/nest-kept.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/B/proj/nest/x.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/B/proj/.claude/rules/case.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/.claude/rules/dir/dir-1.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/.claude/rules/kept.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/.claude/rules/rel.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/.claude/rules/relbase.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/.claude/rules/slashdir/slashdir-1.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/.claude/rules/star/sub/star-2.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    }
+   }
+  },
+  "G10-excludes-settings": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "proj/.claude/rules/good.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/kept.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G10-excludes-syntax": {
+   "probes": {
+    "proj/zz-sentinel.txt": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "proj/.claude/rules/brace-c.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/caret-a.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/cls-c.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/dbl-dir/deep.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/kept.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/nb-w.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/neg-b.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/q12.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/rg-5.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "proj/.claude/rules/rng-d.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
+  "G10-excludes-tilde": {
+   "probes": {
+    "H/work/zz-sentinel.txt HOME={root}/H": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "H/work/.claude/rules/kept.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "H/work/.claude/rules/tilde.md",
+       "memory_type": "Project"
+      }
+     ]
+    }
+   }
+  },
   "G2-normalization": {
    "probes": {
     "proj/zz-dir/x.txt": {
@@ -1503,6 +1750,6 @@
    }
   }
  },
- "cases_sha256": "40973b1fe5a9e36545ecf6389b09fe258a94a7d0a074033749909b1f793f0ba6",
+ "cases_sha256": "1ff510afc5774cac61fa93ae7808ba050a4091173948591a660fbc5424b6dc0b",
  "claude_code": "2.1.273"
 }

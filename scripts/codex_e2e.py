@@ -182,6 +182,8 @@ class Session:
             **os.environ,
             "C2C_RULESYNC_STATE_DIR": str(self.state),
             "C2C_RULESYNC_USER_RULES": "0",
+            # The developer's own user settings must not hide the test rules.
+            "C2C_RULESYNC_CLAUDE_MD_EXCLUDES": "0",
         }
         completed = subprocess.run(
             command,
