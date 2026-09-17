@@ -94,7 +94,7 @@ starting Codex, or for one project in front of its hook command (see
 
 | Variable | Effect |
 |---|---|
-| `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. Codex started from its app, or from a shell without the variable, uses `~/.claude/rules`. A working directory under the home directory still loads `~/.claude/rules` as project rules, as Claude Code does. |
+| `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. A hook that does not see the variable, for example because only a shell function or alias sets it for `claude`, uses `~/.claude/rules`. A working directory under the home directory still loads `~/.claude/rules` as project rules, as Claude Code does. |
 | `C2C_RULESYNC_USER_RULES` | `0` turns user rules off. |
 | `C2C_RULESYNC_STATE_DIR` | An absolute directory, used only by c2c-rulesync, for the record of what each session received. A relative value is ignored. The default is `$XDG_STATE_HOME/c2c-rulesync`, or `~/.local/state/c2c-rulesync`. |
 
@@ -109,13 +109,20 @@ variables in front of the command, in every c2c-rulesync handler of its
 whose configuration lives in `~/.claude-extra`, write
 `command = 'CLAUDE_CONFIG_DIR="$HOME/.claude-extra" c2c-rulesync hook'`.
 
-- Write `$HOME` rather than `~`, which not every shell expands in every
-  assignment.
+- Codex runs the hooks of every configuration layer together: a project's
+  hooks do not replace those in `~/.codex`
+  ([Codex hooks](https://developers.openai.com/codex/hooks)). Wire c2c-rulesync
+  only in project configuration; a handler left in `~/.codex/config.toml` or
+  `~/.codex/hooks.json` still runs beside the project's, with the environment
+  Codex started with, so the variables do not take effect.
+- Write `$HOME` rather than `~`: no shell expands `~` inside quotes, as in
+  `"~/.claude-extra"`, and dash and zsh do not expand it in
+  `env VARIABLE=~/x command`.
 - The `VARIABLE=value command` form needs a POSIX-style shell such as bash or
   zsh.
 - Trust a changed command again with `/hooks`; until then Codex does not run it.
 - Under the home directory, `~/.claude/rules` still loads as project rules, so a
-  rule present in both directories loads twice
+  rule copied into both directories loads twice
   ([docs/behavior.md](docs/behavior.md#when-rules-load)).
 
 ## What Codex sees
