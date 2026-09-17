@@ -365,7 +365,7 @@ class RuleFinder:
             try:
                 mode = os.stat(entry).st_mode
             except OSError:
-                if os.path.islink(entry) and not self._excluded(spelled):
+                if os.path.islink(entry) and not self._excluded(spelled, resolved):
                     self.warnings.append(f"{entry}: a link that cannot be followed; skipped")
                 continue
             points_elsewhere = resolved != os.path.join(resolved_dir, name)

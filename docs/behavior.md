@@ -218,9 +218,9 @@ The pattern syntax is not documented. The G10 recordings show, for Claude Code
   a read passes, nor as a rule whose `paths:` match a read. An excluded
   `CLAUDE.local.md` loads neither at session start nor after a read. The files
   no pattern matches still load.
-- A pattern is compared with the whole absolute path, case-sensitively. A
-  pattern that starts with neither `/` nor `**`, such as `a.md` or
-  `.claude/rules/a.md`, matches nothing, and `~/` is not expanded.
+- A pattern is compared with the whole absolute path, case-sensitively. The
+  relative patterns `a.md` and `.claude/rules/a.md` matched nothing, and `~/`
+  is not expanded.
 - `*` matches within one path segment. `**` as a whole segment matches any
   number of segments, none included; inside a segment, as in `a**.md`, it acts
   as `*`. Both match names that start with a dot, so `/home/me/**` covers
@@ -260,19 +260,31 @@ What c2c-rulesync decides itself:
 - Only the syntax above is supported. A pattern that uses anything else is not
   applied, so that it never hides a file Claude Code would load, and
   c2c-rulesync warns: a leading `!`, a backslash, parentheses or `|` as in
-  extglobs, a `.` or `..` segment, an empty, unclosed or reversed bracket
-  expression or one holding `[`, `/`, `{`, `}` or `,`, braces that are neither a
-  comma list nor an integer range, an empty brace alternative, braces nested
-  more than 16 deep, or more than 4,096 characters. A pattern that can match no
-  absolute path is warned about too. At most 1,000 patterns after brace
-  expansion apply.
+  extglobs, a `.`, `..` or empty segment, also where braces produce one, an
+  unmatched brace or `]`, an empty, unclosed or reversed bracket expression or
+  one holding `[`, `/`, `{`, `}` or `,`, braces that are neither a comma list nor
+  an integer range, an empty brace alternative, braces nested more than 16 deep,
+  or more than 4,096 characters.
+- Generalizing the recorded relative patterns, a pattern or brace alternative
+  that starts with neither `/` nor a whole `**` segment, such as `*/a.md` or
+  `**a.md`, is not applied, with a warning.
+- Forms the recordings do not show are matched the usual way: `-` at either end
+  of a bracket expression is a member, a range such as `{3..-1}` counts down,
+  `?` and bracket expressions match a leading dot as `*` does, a trailing `/**`
+  also matches the path before it, and the leading directories of a pattern
+  with wildcards, such as `/alias/**/a.md`, are resolved through links too.
+- At most 1,000 patterns, and 256 KiB of them, after brace expansion apply, and
+  warnings name at most 10 patterns.
 - A settings file that is not valid JSON (a byte order mark and `NaN` included),
   not an object, larger than 2 MiB or unreadable, or whose `claudeMdExcludes` is
-  not a list of strings, excludes nothing, with a warning. Claude Code reports
-  invalid settings files as errors and skips them in `-p` sessions
-  ([documented](https://code.claude.com/docs/en/settings)).
-- An excluded file raises no warning, even one that could not be read or a
-  broken link.
+  not a list of strings, excludes nothing, with a warning. The other keys are
+  not checked, so a file whose other values Claude Code rejects still has its
+  `claudeMdExcludes` applied. Claude Code reports such a file as a settings
+  error, skips it in `-p` sessions and offers to continue without it in
+  interactive ones ([documented](https://code.claude.com/docs/en/settings)).
+- An excluded file raises no warning, even one that could not be read, or a
+  broken link whose path or target a pattern matches. Warnings about a rules
+  directory itself, unreadable or nested too deeply, remain.
 - The same matching applies on every platform; the recordings are from Linux.
 
 ### Not implemented

@@ -69,16 +69,16 @@ def test_patterns_match_as_claude_code_was_recorded(
 
 
 @pytest.mark.parametrize(
-    "pattern", ["a.md", ".claude/rules/a.md", "~/.claude/rules/**", "*/proj/a.md", "{a,b}/x.md"]
+    "pattern",
+    ["a.md", ".claude/rules/a.md", "~/.claude/rules/**", "*/proj/a.md", "**a.md", "{a,b}/x.md"],
 )
 def test_a_pattern_that_is_not_absolute_matches_nothing_with_a_warning(pattern: str) -> None:
     excludes = Excludes([pattern], "settings.json")
 
     assert not excludes.active
     assert excludes.warnings == [
-        f"settings.json: claudeMdExcludes pattern {json.dumps(pattern)} matches no absolute path"
-        + ("; ~ is not expanded" if pattern.startswith("~") else "")
-        + "; start it with / or **/"
+        f"settings.json: claudeMdExcludes pattern {json.dumps(pattern)} is not applied where it "
+        "starts with neither / nor **/" + ("; ~ is not expanded" if pattern.startswith("~") else "")
     ]
     assert not excludes.matches(f"/home/me/{pattern.lstrip('~/')}")
 
@@ -114,6 +114,11 @@ def test_a_brace_alternative_that_is_not_absolute_leaves_the_others() -> None:
         (f"{R}/a}}.md", "an unmatched brace"),
         (f"{R}/./a.md", "a . or .. segment"),
         (f"{R}/../a.md", "a . or .. segment"),
+        (f"{R}/{{..,x}}/a.md", "a . or .. segment"),
+        (f"{R}/{{.,x}}/a.md", "a . or .. segment"),
+        (f"{R}//a.md", "an empty segment"),
+        (f"{R}/{{,x}}/a.md", "an empty brace alternative"),
+        (f"{R}/{{x/,y}}/a.md", "an empty segment"),
         (f"{R}/" + "a" * 4096, "more than 4096 characters"),
         (f"{R}/{{1..1001}}.md", "more than 1000 brace alternatives"),
         (f"{R}/{{1..100}}{{1..11}}.md", "more than 1000 brace alternatives"),
@@ -132,17 +137,35 @@ def test_unsupported_syntax_is_not_applied_and_warned_about(pattern: str, proble
     assert not excludes.matches(f"{R}/a.md")
 
 
-def test_patterns_beyond_1000_alternatives_are_not_applied() -> None:
-    patterns = [f"{R}/{{1..500}}.md", f"{R}/{{501..1000}}.md", f"{R}/late.md", f"{R}/later.md"]
-    excludes = Excludes(patterns, "settings.json")
+@pytest.mark.parametrize(
+    "applied",
+    [
+        [f"{R}/{{1..500}}.md", f"{R}/{{501..1000}}.md"],
+        [f"{R}/1000.md", f"{R}/{{1..63}}/" + "a" * 4000 + ".md"],
+    ],
+)
+def test_patterns_beyond_1000_alternatives_or_256_kib_are_not_applied(
+    applied: list[str],
+) -> None:
+    first_unapplied = f"{R}/{{late,x}}/" + "a" * 4000 + ".md"
+    excludes = Excludes([*applied, first_unapplied, f"{R}/later.md"], "settings.json")
 
     assert excludes.matches(f"{R}/1000.md")
-    assert not excludes.matches(f"{R}/late.md")
+    assert not excludes.matches(f"{R}/late/{'a' * 4000}.md")
     assert not excludes.matches(f"{R}/later.md")
+    shown = first_unapplied[:100] + "..."
     assert excludes.warnings == [
-        "settings.json: claudeMdExcludes expands to more than 1000 patterns; "
-        f'"{R}/late.md" and the patterns after it are not applied'
+        "settings.json: claudeMdExcludes expands to more than 1000 patterns or 262144 "
+        f'characters; "{shown}" and the patterns after it are not applied'
     ]
+
+
+def test_warnings_name_at_most_10_patterns() -> None:
+    excludes = Excludes([f"!{number}" for number in range(25)], "settings.json")
+
+    assert len(excludes.warnings) == 11
+    assert '"!9"' in excludes.warnings[9]
+    assert excludes.warnings[10] == "settings.json: 15 more notes about claudeMdExcludes patterns"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
@@ -166,6 +189,7 @@ def test_leading_directories_of_a_pattern_also_match_through_links(tmp_path: Pat
 @pytest.mark.parametrize(
     ("pattern", "path"),
     [
+        ("/a" * 2040 + "/{1..999}", "/a/b"),
         ("/" + "*a" * 1000 + "b", "/" + "a" * 3000),
         ("/" + "*a*" * 500 + "b", "/" + "ab" * 1500),
         ("/" + "**/a/" * 500 + "b", "/" + "/".join(["a"] * 3000)),

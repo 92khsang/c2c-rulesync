@@ -6,9 +6,8 @@ The documentation does not describe the glob syntax, so the matching here
 follows what Claude Code 2.1.273 was recorded doing (the G10 cases in
 tests/parity/cases.json):
 
-- a pattern is compared with the whole absolute path, case-sensitively, and a
-  pattern that starts with neither ``/`` nor ``**`` matches nothing; ``~`` is
-  not expanded;
+- a pattern is compared with the whole absolute path, case-sensitively;
+  relative patterns match nothing, and ``~`` is not expanded;
 - ``*`` and ``?`` match within one path segment, ``**`` as a whole segment
   matches any number of segments, and inside a segment it acts as ``*``; all of
   them match names that start with a dot;
@@ -20,7 +19,8 @@ tests/parity/cases.json):
 - one entry that is not a string leaves the whole list unapplied.
 
 A pattern using any other syntax, such as extglobs, escapes or a leading ``!``,
-is ignored with a warning, so that it never hides a file Claude Code would load.
+or starting with neither ``/`` nor a ``**`` segment, is ignored with a warning,
+so that it never hides a file Claude Code would load.
 """
 
 from __future__ import annotations
@@ -36,10 +36,14 @@ __all__ = ["MAX_SETTINGS_BYTES", "Excludes", "load_excludes"]
 # Claude Code refuses a settings file larger than this.
 MAX_SETTINGS_BYTES = 2 * 1024 * 1024
 _MAX_PATTERN_LENGTH = 4096
-# Patterns after brace expansion, over all entries; matching cost grows with them.
+# Patterns after brace expansion, and their characters, over all entries;
+# building and matching them takes time in proportion.
 _MAX_ALTERNATIVES = 1000
+_MAX_EXPANDED_CHARACTERS = 256 * 1024
 # Deeper braces would make expansion take time quadratic in the pattern's length.
 _MAX_BRACE_DEPTH = 16
+# Patterns warned about by name; the rest are counted in one warning.
+_MAX_PATTERN_WARNINGS = 10
 _SHOWN_PATTERN_LENGTH = 100
 _KEY = "claudeMdExcludes"
 
@@ -91,18 +95,26 @@ class Excludes:
     """
 
     def __init__(self, patterns: Sequence[str], source: str) -> None:
-        self.warnings: list[str] = []
         self._alternatives: list[tuple[_Segment, ...]] = []
-        count = 0
+        self._resolved: dict[str, str] = {}
+        notes = []
+        count = size = 0
         for pattern in patterns:
-            expanded = self._expand(pattern, source)
-            if expanded is None:
+            try:
+                expanded = _expand(pattern)
+            except _Unsupported as error:
+                notes.append(
+                    f"{_KEY} pattern {_shown(pattern)} uses {error}, which c2c-rulesync does "
+                    "not support; the pattern is not applied"
+                )
                 continue
             count += len(expanded)
-            if count > _MAX_ALTERNATIVES:
-                self.warnings.append(
-                    f"{source}: {_KEY} expands to more than {_MAX_ALTERNATIVES} patterns; "
-                    f"{_shown(pattern)} and the patterns after it are not applied"
+            size += sum(len(alternative) for alternative in expanded)
+            if count > _MAX_ALTERNATIVES or size > _MAX_EXPANDED_CHARACTERS:
+                notes.append(
+                    f"{_KEY} expands to more than {_MAX_ALTERNATIVES} patterns or "
+                    f"{_MAX_EXPANDED_CHARACTERS} characters; {_shown(pattern)} and the patterns "
+                    "after it are not applied"
                 )
                 break
             relative = False
@@ -111,13 +123,16 @@ class Excludes:
                 if segments is None:
                     relative = True
                 else:
-                    self._alternatives += _with_resolved_prefix(segments)
+                    self._alternatives += self._with_resolved_prefix(segments)
             if relative:
-                self.warnings.append(
-                    f"{source}: {_KEY} pattern {_shown(pattern)} matches no absolute path"
-                    + ("; ~ is not expanded" if pattern.startswith("~") else "")
-                    + "; start it with / or **/"
+                notes.append(
+                    f"{_KEY} pattern {_shown(pattern)} is not applied where it starts with "
+                    "neither / nor **/" + ("; ~ is not expanded" if pattern.startswith("~") else "")
                 )
+        if len(notes) > _MAX_PATTERN_WARNINGS:
+            more = len(notes) - _MAX_PATTERN_WARNINGS
+            notes[_MAX_PATTERN_WARNINGS:] = [f"{more} more notes about {_KEY} patterns"]
+        self.warnings = [f"{source}: {note}" for note in notes]
         self.active = bool(self._alternatives)
 
     def matches(self, path: str) -> bool:
@@ -127,23 +142,32 @@ class Excludes:
         parts = path.split("/")[1:]
         return any(_match_segments(segments, parts) for segments in self._alternatives)
 
-    def _expand(self, pattern: str, source: str) -> list[str] | None:
-        problem = _unsupported(pattern)
-        expanded: list[str] = []
-        if problem is None:
+    def _with_resolved_prefix(self, segments: tuple[_Segment, ...]) -> list[tuple[_Segment, ...]]:
+        """``segments``, and them with their leading literal directories resolved when that differs.
+
+        Claude Code 2.1.273 applied a pattern written through a linked directory to
+        the files under the directory it leads to, but a pattern naming a linked
+        file did not exclude the file the link leads to (G10-excludes-links).
+        """
+        fixed = 0
+        while fixed < len(segments) - 1 and isinstance(segments[fixed], str):
+            fixed += 1
+        if fixed == 0:
+            return [segments]
+        base = "/" + "/".join(str(segment) for segment in segments[:fixed])
+        resolved = self._resolved.get(base)
+        if resolved is None:
             try:
-                expanded = _expand_braces(pattern)
-            except _Unsupported as error:
-                problem = str(error)
-            except RecursionError:
-                problem = "too many braces"
-        if problem is not None:
-            self.warnings.append(
-                f"{source}: {_KEY} pattern {_shown(pattern)} uses {problem}, which "
-                "c2c-rulesync does not support; the pattern is not applied"
-            )
-            return None
-        return expanded
+                # A directory that does not exist holds no file to exclude, and
+                # strict resolution stops at the first missing component.
+                resolved = os.path.realpath(base, strict=True)
+            except (OSError, ValueError):
+                resolved = base
+            self._resolved[base] = resolved
+        if resolved == base:
+            return [segments]
+        resolved_segments = tuple(name for name in resolved.split("/")[1:] if name)
+        return [segments, resolved_segments + segments[fixed:]]
 
 
 class _NotAFile(Exception):
@@ -235,9 +259,25 @@ def _unsupported(pattern: str) -> str | None:
     outside.append(pattern[position:])
     if "]" in "".join(outside):
         return "a bracket expression"
-    if any(name in (".", "..") for name in pattern.split("/")):
-        return "a . or .. segment"
     return None
+
+
+def _expand(pattern: str) -> list[str]:
+    """The alternatives of a supported ``pattern``; raises ``_Unsupported`` otherwise."""
+    problem = _unsupported(pattern)
+    if problem is not None:
+        raise _Unsupported(problem)
+    try:
+        expanded = _expand_braces(pattern)
+    except RecursionError:
+        raise _Unsupported("too many braces") from None
+    for alternative in expanded:
+        names = alternative.split("/")
+        if any(name in (".", "..") for name in names):
+            raise _Unsupported("a . or .. segment")
+        if "" in names[1:-1]:
+            raise _Unsupported("an empty segment")
+    return expanded
 
 
 def _class_end(text: str, start: int) -> int:
@@ -358,29 +398,6 @@ def _compile_segment(name: str) -> _Segment:
             tokens.append(char)
         index += 1
     return tuple(tokens)
-
-
-def _with_resolved_prefix(segments: tuple[_Segment, ...]) -> list[tuple[_Segment, ...]]:
-    """``segments``, and them with their leading literal directories resolved when that differs.
-
-    Claude Code 2.1.273 applied a pattern written through a linked directory to
-    the files under the directory it leads to, but a pattern naming a linked
-    file did not exclude the file the link leads to (G10-excludes-links).
-    """
-    fixed = 0
-    while fixed < len(segments) - 1 and isinstance(segments[fixed], str) and segments[fixed]:
-        fixed += 1
-    if fixed == 0:
-        return [segments]
-    base = "/" + "/".join(str(segment) for segment in segments[:fixed])
-    try:
-        resolved = os.path.realpath(base)
-    except (OSError, ValueError):
-        return [segments]
-    if resolved == base:
-        return [segments]
-    resolved_segments = tuple(name for name in resolved.split("/")[1:] if name)
-    return [segments, resolved_segments + segments[fixed:]]
 
 
 def _match_segments(pattern: tuple[_Segment, ...], parts: list[str]) -> bool:

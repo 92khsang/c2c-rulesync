@@ -836,6 +836,8 @@ def test_excluded_files_raise_no_warnings(tree: Path) -> None:
     (tree / "proj/.claude/rules/big.md").write_bytes(b"x" * (4 * 1024 * 1024 + 1))
     (tree / "proj/.claude/rules/bad-utf8.md").write_bytes(b"\xff\n")
     (tree / "proj/.claude/rules/broken.md").symlink_to("missing.md")
+    (tree / "proj/.claude/rules/sub").mkdir()
+    (tree / "proj/.claude/rules/sub/dangling.md").symlink_to("../../../gone/target.md")
     (tree / "proj/pkg/CLAUDE.local.md").symlink_to("missing.md")
 
     def warnings(excludes: Excludes | None) -> list[str]:
@@ -847,10 +849,22 @@ def test_excluded_files_raise_no_warnings(tree: Path) -> None:
         return finder.warnings
 
     unexcluded = " ".join(warnings(None))
-    for name in ("bad-yaml.md", "big.md", "bad-utf8.md", "broken.md", "pkg/CLAUDE.local.md"):
+    for name in (
+        "bad-yaml.md",
+        "big.md",
+        "bad-utf8.md",
+        "broken.md",
+        "dangling.md",
+        "pkg/CLAUDE.local.md",
+    ):
         assert name in unexcluded
     assert "@notes.md" in unexcluded
-    excludes = excluding(tree, "{root}/proj/.claude/rules/*.md", "{root}/proj/**/CLAUDE.local.md")
+    excludes = excluding(
+        tree,
+        "{root}/proj/.claude/rules/*.md",
+        "{root}/proj/gone/target.md",
+        "{root}/proj/**/CLAUDE.local.md",
+    )
     assert warnings(excludes) == []
 
 
