@@ -1,6 +1,7 @@
 c2c-rulesync is a Codex CLI command hook that loads Claude Code `.claude/rules/*.md` files, and on
-request `CLAUDE.local.md` files, into Codex under the conditions Claude Code 2.1.273 loads them. It
-is a Python port of codex-path-rules.
+request `CLAUDE.local.md` files, into Codex under the conditions Claude Code 2.1.273 loads them,
+including the `claudeMdExcludes` of Claude Code's user settings. It is a Python port of
+codex-path-rules.
 
 ## Rules
 
