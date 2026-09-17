@@ -155,6 +155,28 @@ def test_user_rules_default_to_the_home_directory_and_can_be_turned_off(codex: C
     assert codex.send("SessionStart", session_id="s-2") is None
 
 
+@pytest.mark.parametrize("config", ["{home}/.claude-extra", "~/.claude-extra"])
+def test_home_rules_load_as_project_rules_beside_another_config_directory(
+    codex: Codex, config: str
+) -> None:
+    project = codex.home / "work" / "spec"
+    project.mkdir(parents=True)
+    python = '---\npaths: "*.py"\n---\nComment Python.\n'
+    for directory in (".claude-extra", ".claude"):
+        (codex.home / directory / "rules").mkdir(parents=True)
+        (codex.home / directory / "rules" / "comments-python.md").write_text(python)
+    (codex.home / ".claude" / "rules" / "context7.md").write_text("Use Context7.\n")
+
+    codex.environ["CLAUDE_CONFIG_DIR"] = config.format(home=codex.home)
+    assert rule_paths(codex.send("SessionStart", cwd=str(project))) == [
+        "~/.claude/rules/context7.md"
+    ]
+    assert rule_paths(codex.bash("cat src/a.py", cwd=str(project))) == [
+        "~/.claude-extra/rules/comments-python.md",
+        "~/.claude/rules/comments-python.md",
+    ]
+
+
 # Tool calls ----------------------------------------------------------------------------
 
 
