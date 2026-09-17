@@ -11,7 +11,10 @@ Wiring (see README.md):
 - ``PostCompact`` forgets what the thread received and prints nothing.
 
 Every other event, and ``SessionStart`` with source ``resume``, does nothing:
-a resumed thread still holds what it received.
+a resumed thread still holds what it received. With
+``C2C_RULESYNC_EPHEMERAL_RULES=0``, no event does anything in a thread whose
+payload has a null ``transcript_path``, such as a side conversation: it gets no
+rules and leaves no state.
 """
 
 from __future__ import annotations
@@ -53,6 +56,10 @@ def run_hook(
     if not injects and event != "PostCompact":
         return
     if event == "SessionStart" and payload.source not in _START_SOURCES:
+        return
+    if payload.transcript_null and environ.get("C2C_RULESYNC_EPHEMERAL_RULES") == "0":
+        # Codex keeps no transcript for an ephemeral thread, such as a side
+        # conversation, and nothing else in the payload tells it apart.
         return
 
     root = state_root(environ)

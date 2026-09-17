@@ -238,6 +238,10 @@ hook schemas, vendored under `tests/vectors/codex-0.154.0/`).
 | `PreToolUse` | Injects the rules the tool call's files load, and any session start rules the thread has not received. |
 | `PostCompact` | Forgets what the thread received; prints nothing. |
 
+With `C2C_RULESYNC_EPHEMERAL_RULES=0`, none of these events does anything in a
+thread whose payload has a null `transcript_path`; see
+[Threads without a transcript](#threads-without-a-transcript).
+
 ### Once per thread
 
 Like Claude Code, each thread of a session receives a rule file once until
@@ -248,7 +252,8 @@ under the state directory (see the README), per session id and thread:
 - another internal thread, such as a review, is told apart by the thread id in
   its transcript file name (inferred from the Codex source, not observed). An
   ephemeral session has no transcript, so its internal threads share the main
-  thread's record, and a rule one of them receives is not sent to the other;
+  thread's record, and a rule one of them receives is not sent to the other,
+  unless `C2C_RULESYNC_EPHEMERAL_RULES=0` leaves them without rules;
 - everything else belongs to the main thread.
 
 Reading a rule file counts as receiving it; only reads of `.md` files are
@@ -277,12 +282,57 @@ Limits of the Codex events:
   rules come back with its next wired tool call.
 - A forked conversation (`codex fork`, or a subagent spawned with the parent's
   history) is a new thread and receives rules again, which duplicates them in
-  the copied history.
+  the copied history. A side conversation is such a fork too; see
+  [Threads without a transcript](#threads-without-a-transcript).
 - The session start rules are those of the working directory when a thread
   first receives them; rules without `paths:` of a directory the session
   changes to later are not delivered.
 - A file edited by `apply_patch` without a prior read loads its rules just
   before the patch applies, after the model has already written the patch.
+
+### Threads without a transcript
+
+Codex 0.154.0 sends a null `transcript_path` for every thread it keeps no
+transcript file for (read from its source, `openai/codex` tag `rust-v0.154.0`,
+`core/src/session/mod.rs`):
+
+- a side conversation, started with `/side` or `/btw` in the Codex TUI. It is an
+  ephemeral fork (`tui/src/app/side.rs`) that starts with a copy of the parent's
+  history, rules already injected included, which its instructions call
+  reference context only. It may read files, and edit them when the user asks.
+  Its first turn runs `SessionStart` with source `startup`
+  (`core/src/session/session.rs`) and a new session id, its tool calls carry
+  that id, and compaction in it runs `SessionStart` with source `compact`;
+- `codex exec --ephemeral` sessions, and forks made with
+  `codex exec fork --ephemeral`;
+- a subagent or review started in an ephemeral session, which copies that
+  session's configuration (`core/src/tools/handlers/multi_agents_common.rs`,
+  `core/src/tasks/review.rs`; not observed);
+- every thread of a thread store that is not local.
+
+Persistent sessions, `/fork`, `codex fork`, and the subagents and review
+threads of a persistent session have a transcript. Nothing in the payload, the
+hook's environment or Codex's configuration tells a side conversation apart
+from the other threads without a transcript.
+
+By default such a thread is handled like any other, so a side conversation
+receives the session start rules again, duplicating them in its copied history,
+as well as rules for the files it reads. With Codex CLI 0.154.0 (September
+2026), two side conversations each left a record and received a user rule the
+main thread had already received.
+
+With `C2C_RULESYNC_EPHEMERAL_RULES=0`, every event whose `transcript_path` is
+JSON null does nothing: no rules, no hook message, and no record, lock, epoch
+or sweep. A missing `transcript_path` or any string counts as a transcript.
+Files a side conversation reads or edits then load no rules either, including
+rules the main thread never received, and a side conversation that compacts
+holds none. Claude Code's side questions need no rules because they have no
+tool access and answer only from what is already in the conversation
+([documented](https://code.claude.com/docs/en/interactive-mode#side-questions-with-btw));
+a Codex side conversation can run tools. The setting also leaves
+`codex exec --ephemeral` sessions and threads of a store that is not local
+without rules, and it takes effect only when every c2c-rulesync handler Codex
+runs for the session sets it.
 
 ### Checked with Codex
 
@@ -301,7 +351,8 @@ as developer messages in each session's rollout file. With Codex CLI 0.154.0
   hooks passed with `-c`.
 
 It uses the developer's Codex login and configuration, including their own
-hooks, and never runs in CI. Compaction and subagents are not exercised.
+hooks, and never runs in CI. Compaction, subagents and side conversations are
+not exercised.
 
 ### Output
 
