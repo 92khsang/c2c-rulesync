@@ -4,6 +4,10 @@ tests/parity/cases.json describes file trees and the files a session reads.
 scripts/claude_parity_oracle.py recorded, for each of them, which rule files
 Claude Code 2.1.273 loaded at session start and after each read. These tests
 rebuild every tree and check that c2c-rulesync predicts the same loads.
+
+A probe whose ``setting_sources`` include ``local`` also loaded CLAUDE.local.md
+files, and the files they import. c2c-rulesync does not expand imports; it warns
+about them, so the warning must name each imported file instead.
 """
 
 from __future__ import annotations
@@ -20,7 +24,8 @@ from typing import Any
 
 import pytest
 
-from c2c_rulesync.rules import RuleFinder, SessionRules
+from c2c_rulesync.imports import import_references
+from c2c_rulesync.rules import LOCAL, Rule, RuleFinder, SessionRules
 
 PARITY_DIR = Path(__file__).parent / "parity"
 CASES_BYTES = (PARITY_DIR / "cases.json").read_bytes()
@@ -47,6 +52,8 @@ def probe_key(probe: dict[str, Any]) -> str:
         key += " " + " ".join(probe["args"])
     if probe.get("env"):
         key += " " + " ".join(f"{name}={value}" for name, value in sorted(probe["env"].items()))
+    if probe.get("setting_sources"):
+        key += f" --setting-sources {probe['setting_sources']}"
     return key
 
 
@@ -89,6 +96,17 @@ def canonical(root: Path, relative: str) -> str:
     return os.path.relpath(os.path.realpath(root / relative), root)
 
 
+def recorded_file(root: Path, load: dict[str, Any]) -> str:
+    """The file of a recorded load as c2c-rulesync names it.
+
+    Claude Code names a rule file by its resolved path and a CLAUDE.local.md by
+    the path it was found at, a link included.
+    """
+    if load.get("memory_type") == "Local":
+        return os.path.normpath(str(load["file"]))
+    return canonical(root, load["file"])
+
+
 def test_the_recording_is_for_the_current_cases() -> None:
     assert GOLDEN["cases_sha256"] == hashlib.sha256(CASES_BYTES).hexdigest(), (
         "tests/parity/cases.json changed; rerun scripts/claude_parity_oracle.py"
@@ -111,18 +129,19 @@ def test_rule_loads_match_claude_code(
         pytest.skip(reason)
     build_tree(root, case)
     cwd = root / probe.get("cwd", case["cwd"])
-    finder = RuleFinder(str(cwd), user_rules_dir=None)
+    local = "local" in probe.get("setting_sources", "project").split(",")
+    finder = RuleFinder(str(cwd), user_rules_dir=None, local_instructions=local)
     session = SessionRules()
 
-    session_start = [
-        {"file": os.path.relpath(rule.path, root)}
-        for rule in session.take(finder.session_start_rules())
-    ]
+    delivered: list[Rule] = session.take(finder.session_start_rules())
+    session_start = [{"file": os.path.relpath(rule.path, root)} for rule in delivered]
     lazy = []
     for read in probe["read"]:
         # Claude Code records the read before it loads the rules the read triggers.
         session.mark_read(str(root / read))
-        for rule in session.take(finder.trigger_rules(str(root / read))):
+        triggered = session.take(finder.trigger_rules(str(root / read)))
+        delivered += triggered
+        for rule in triggered:
             entry: dict[str, Any] = {
                 "file": os.path.relpath(rule.path, root),
                 "trigger": read,
@@ -134,19 +153,29 @@ def test_rule_loads_match_claude_code(
 
     recorded = GOLDEN["cases"][case["id"]]["probes"][probe_key(probe)]
     assert "read_errors" not in recorded
-    expected_lazy = LAZY_DIVERGENCES.get((case["id"], probe_key(probe)), recorded["lazy"])
+    imported = [load for load in recorded["lazy"] if load["load_reason"] == "include"]
+    loaded = [load for load in recorded["lazy"] if load["load_reason"] != "include"]
+    expected_lazy = LAZY_DIVERGENCES.get((case["id"], probe_key(probe)), loaded)
     assert sorted_entries(session_start) == sorted_entries(
-        [{"file": canonical(root, load["file"])} for load in recorded["session_start"]]
+        [{"file": recorded_file(root, load)} for load in recorded["session_start"]]
     )
     assert sorted_entries(lazy) == sorted_entries(
         [
             {
                 **{k: v for k, v in load.items() if k != "memory_type"},
-                "file": canonical(root, load["file"]),
+                "file": recorded_file(root, load),
             }
             for load in expected_lazy
         ]
     )
+    warned = {
+        canonical(root, os.path.relpath(os.path.join(os.path.dirname(rule.path), token[1:]), root))
+        for rule in delivered
+        if rule.source == LOCAL
+        for token in import_references(rule.body)
+        if any(token in warning for warning in rule.warnings)
+    }
+    assert {canonical(root, load["file"]) for load in imported} <= warned
 
 
 def sorted_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:

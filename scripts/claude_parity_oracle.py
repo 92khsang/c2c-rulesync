@@ -17,7 +17,10 @@ against c2c-rulesync offline.
 
 The run calls a paid model and uses the developer's Claude Code login, so it is
 never run in CI. Project-level cases only: the developer's own user-level
-rules and settings are excluded with ``--setting-sources project``.
+rules and settings are excluded with ``--setting-sources project``. A probe's
+``setting_sources`` replaces that value: all G9 probes but one add ``local`` so
+that Claude Code loads CLAUDE.local.md files, and the remaining one records that
+none load without it.
 
 Usage:
     python3 scripts/claude_parity_oracle.py --claude-bin ~/.local/share/claude/versions/2.1.273
@@ -170,7 +173,8 @@ def requirement_met(requirement: str) -> bool:
 
 
 def probe_key(probe: dict[str, Any]) -> str:
-    """A stable name for a probe: its reads, plus its directory, arguments and environment."""
+    """A stable name for a probe: its reads, plus its directory, arguments, environment and
+    setting sources."""
     key = "+".join(probe["read"])
     if probe.get("cwd"):
         key += f" (cwd {probe['cwd']})"
@@ -178,6 +182,8 @@ def probe_key(probe: dict[str, Any]) -> str:
         key += " " + " ".join(probe["args"])
     if probe.get("env"):
         key += " " + " ".join(f"{name}={value}" for name, value in sorted(probe["env"].items()))
+    if probe.get("setting_sources"):
+        key += f" --setting-sources {probe['setting_sources']}"
     return key
 
 
@@ -205,7 +211,12 @@ def build_tree(root: Path, case: dict[str, Any]) -> None:
 
 def check_clean_ancestors(root: Path) -> None:
     for ancestor in root.parents:
-        for name in (*INSTRUCTION_FILE_NAMES, ".claude/CLAUDE.md", ".claude/rules"):
+        for name in (
+            *INSTRUCTION_FILE_NAMES,
+            ".claude/CLAUDE.md",
+            ".claude/CLAUDE.local.md",
+            ".claude/rules",
+        ):
             if (ancestor / name).exists():
                 raise SystemExit(
                     f"{ancestor / name} would load in every case; use another temp dir"
@@ -269,7 +280,7 @@ def record_probe(
             "--model",
             model,
             "--setting-sources",
-            "project",
+            probe.get("setting_sources", "project"),
             "--settings",
             str(settings_path),
             "--tools",

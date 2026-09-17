@@ -11,6 +11,10 @@ under the same conditions Claude Code 2.1.273 loads them.
   `.claude/rules` of the working directory and its ancestors, and from
   `.claude/rules` directories below the working directory that a touched file
   lives under.
+- With `C2C_RULESYNC_LOCAL_INSTRUCTIONS=1`, `CLAUDE.local.md` files, private
+  project instructions, are delivered too, where Claude Code loads them;
+  `@path` imports in them are not expanded. `CLAUDE.md` files are not delivered:
+  they usually import `AGENTS.md`, which Codex reads itself.
 
 [docs/behavior.md](docs/behavior.md) specifies what loads when, and every known
 difference from Claude Code.
@@ -97,6 +101,7 @@ starting Codex, or for one project in front of its hook command (see
 | `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. A hook that does not see the variable, for example because only a shell function or alias sets it for `claude`, uses `~/.claude/rules`. A working directory under the home directory still loads `~/.claude/rules` as project rules, as Claude Code does. |
 | `C2C_RULESYNC_USER_RULES` | `0` turns user rules off. |
 | `C2C_RULESYNC_EPHEMERAL_RULES` | `0` gives no rules to threads Codex keeps no transcript for. These are side conversations (`/side`, `/btw`), whose copied history already holds the rules the main thread received but whose own file reads and edits then load none; `codex exec --ephemeral` sessions; and every thread of a thread store that is not local, as read from the Codex CLI 0.154.0 source ([docs/behavior.md](docs/behavior.md#threads-without-a-transcript)). |
+| `C2C_RULESYNC_LOCAL_INSTRUCTIONS` | `1` also delivers `CLAUDE.local.md` files: those of the working directory and its ancestors when a thread starts, and those of the directories below it that lead to a file a tool call reads or edits. Off by default, because the files are private; any other value leaves them off. `@path` imports in them are not expanded, and the hook warns about them. A thread that received its session start rules before the variable was set gets the start-time files after compaction. Links are followed wherever they lead, as in Claude Code, so a `CLAUDE.local.md` link in any checkout delivers the file it points to ([docs/behavior.md](docs/behavior.md#local-instructions-claudelocalmd)). |
 | `C2C_RULESYNC_STATE_DIR` | An absolute directory, used only by c2c-rulesync, for the record of what each session received. A relative value is ignored. The default is `$XDG_STATE_HOME/c2c-rulesync`, or `~/.local/state/c2c-rulesync`. |
 
 If the record cannot be written, the hook says so when a session starts and
@@ -130,7 +135,8 @@ variables can go in front, as in
 
 ## What Codex sees
 
-Rules reach the model in a developer message, one element per rule:
+Rules, and `CLAUDE.local.md` files when they are turned on, reach the model in a
+developer message, one element per file:
 
 ```text
 <rule path=".claude/rules/testing.md">
@@ -138,8 +144,9 @@ Run the unit tests before committing.
 </rule>
 ```
 
-The user sees a hook message listing the rules loaded, and any warning about a
-rule file c2c-rulesync could not read the way Claude Code would.
+The user sees a hook message listing the files loaded, and any warning about a
+file c2c-rulesync could not read the way Claude Code would or imports it did not
+expand.
 
 ## License
 
