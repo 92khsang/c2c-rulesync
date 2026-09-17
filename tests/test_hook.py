@@ -539,6 +539,58 @@ def test_threads_without_a_transcript_share_the_main_thread(codex: Codex) -> Non
     assert codex.bash("cat src/a.ts") is None
 
 
+def test_threads_without_a_transcript_can_be_left_without_rules(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n", ".claude/rules/src.md": SCOPED})
+    old = codex.state / "sessions" / "old"
+    old.mkdir(parents=True)
+    (old / "root.json").write_text("{}")
+    week_ago = time.time() - 8 * 24 * 3600
+    os.utime(old / "root.json", (week_ago, week_ago))
+    codex.environ["C2C_RULESYNC_EPHEMERAL_RULES"] = "0"
+    side = {"session_id": "019a0000-0000-7000-8000-00000000051d", "transcript_path": None}
+
+    assert codex.send("SessionStart", **side) is None
+    assert codex.send("SubagentStart", **side) is None
+    assert codex.bash("cat src/a.ts", **side) is None
+    assert codex.send("PostCompact", **side) is None
+    assert codex.send("SessionStart", source="compact", **side) is None
+    # Nothing was recorded, locked or swept.
+    assert sorted(path.relative_to(codex.state).as_posix() for path in codex.state.rglob("*")) == [
+        "sessions",
+        "sessions/old",
+        "sessions/old/root.json",
+    ]
+
+    assert rule_paths(codex.send("SessionStart")) == [".claude/rules/style.md"]
+    assert not old.exists()
+
+
+@pytest.mark.parametrize("value", ["", "1", "false", " 0"])
+def test_only_0_turns_rules_off_for_threads_without_a_transcript(codex: Codex, value: str) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n"})
+    codex.environ["C2C_RULESYNC_EPHEMERAL_RULES"] = value
+
+    assert rule_paths(codex.send("SessionStart", transcript_path=None)) == [
+        ".claude/rules/style.md"
+    ]
+
+
+def test_only_a_null_transcript_path_counts_as_no_transcript(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n"})
+    codex.environ["C2C_RULESYNC_EPHEMERAL_RULES"] = "0"
+
+    output = codex.send("SessionStart", session_id="s-empty", transcript_path="")
+    assert rule_paths(output) == [".claude/rules/style.md"]
+
+    # Codex 0.154.0 always sends the key, so its schema rejects this payload.
+    payload = codex.payload("SessionStart", session_id="s-missing")
+    del payload["transcript_path"]
+    outputs: list[bytes] = []
+    run_hook(json.dumps(payload).encode(), outputs.append, codex.environ)
+    assert len(outputs) == 1
+    assert rule_paths(json.loads(outputs[0])) == [".claude/rules/style.md"]
+
+
 @pytest.mark.parametrize("event", ["SubagentStart", "PreToolUse"])
 def test_warnings_alone_are_valid_output(codex: Codex, event: str) -> None:
     codex.write({".claude/rules/broken.md": "---\npaths:\n  - **/*.ts\n---\n\n"})

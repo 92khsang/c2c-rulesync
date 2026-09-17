@@ -96,6 +96,7 @@ starting Codex, or for one project in front of its hook command (see
 |---|---|
 | `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. A hook that does not see the variable, for example because only a shell function or alias sets it for `claude`, uses `~/.claude/rules`. A working directory under the home directory still loads `~/.claude/rules` as project rules, as Claude Code does. |
 | `C2C_RULESYNC_USER_RULES` | `0` turns user rules off. |
+| `C2C_RULESYNC_EPHEMERAL_RULES` | `0` gives no rules to threads Codex keeps no transcript for. These are side conversations (`/side`, `/btw`), whose copied history already holds the rules the main thread received but whose own file reads and edits then load none; `codex exec --ephemeral` sessions; and every thread of a thread store that is not local, as read from the Codex CLI 0.154.0 source ([docs/behavior.md](docs/behavior.md#threads-without-a-transcript)). |
 | `C2C_RULESYNC_STATE_DIR` | An absolute directory, used only by c2c-rulesync, for the record of what each session received. A relative value is ignored. The default is `$XDG_STATE_HOME/c2c-rulesync`, or `~/.local/state/c2c-rulesync`. |
 
 If the record cannot be written, the hook says so when a session starts and
@@ -107,7 +108,9 @@ Codex runs a hook command with the user's shell, so a project can set these
 variables in front of the command, in every c2c-rulesync handler of its
 `.codex/config.toml`. For a project used only with a second Claude Code account
 whose configuration lives in `~/.claude-extra`, write
-`command = 'CLAUDE_CONFIG_DIR="$HOME/.claude-extra" c2c-rulesync hook'`.
+`command = 'CLAUDE_CONFIG_DIR="$HOME/.claude-extra" c2c-rulesync hook'`. Several
+variables can go in front, as in
+`CLAUDE_CONFIG_DIR="$HOME/.claude-extra" C2C_RULESYNC_EPHEMERAL_RULES=0 c2c-rulesync hook`.
 
 - Codex runs the hooks of every configuration layer together: a project's
   hooks do not replace those in `~/.codex`

@@ -25,6 +25,9 @@ class Payload:
         source: ``SessionStart``'s ``source``, such as ``startup``, or ``None``.
         agent_id: The subagent id of a thread spawned by a subagent tool, or ``None``.
         transcript_path: The thread's transcript file, or ``None``.
+        transcript_null: Whether ``transcript_path`` is JSON null, as Codex sends
+            for a thread it keeps no transcript for. ``False`` when the key is
+            missing or holds anything else.
         tool_name: ``PreToolUse``'s ``tool_name``, or ``None``.
         tool_input: ``PreToolUse``'s ``tool_input``, of any JSON type.
     """
@@ -37,6 +40,7 @@ class Payload:
         "source",
         "tool_input",
         "tool_name",
+        "transcript_null",
         "transcript_path",
     )
 
@@ -48,6 +52,7 @@ class Payload:
         self.source = _string(fields.get("source"))
         self.agent_id = _string(fields.get("agent_id"))
         self.transcript_path = _string(fields.get("transcript_path"))
+        self.transcript_null = "transcript_path" in fields and fields["transcript_path"] is None
         self.tool_name = _string(fields.get("tool_name"))
         self.tool_input = fields.get("tool_input")
 
