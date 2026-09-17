@@ -177,6 +177,65 @@ def test_home_rules_load_as_project_rules_beside_another_config_directory(
     ]
 
 
+@pytest.mark.parametrize("value", [None, "", "0", "true", "yes", " 1", "1 "])
+def test_local_instructions_need_exactly_1(codex: Codex, value: str | None) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n", "CLAUDE.local.md": "Mine.\n"})
+    if value is not None:
+        codex.environ["C2C_RULESYNC_LOCAL_INSTRUCTIONS"] = value
+
+    assert rule_paths(codex.send("SessionStart")) == [".claude/rules/style.md"]
+
+
+def test_local_instructions_are_delivered_like_rules(codex: Codex) -> None:
+    codex.write(
+        {
+            ".claude/rules/style.md": "Use tabs.\n",
+            "CLAUDE.local.md": "Mine.\n",
+            "pkg/CLAUDE.local.md": "Nested mine.\n",
+        }
+    )
+    codex.environ["C2C_RULESYNC_LOCAL_INSTRUCTIONS"] = "1"
+    codex.environ["C2C_RULESYNC_USER_RULES"] = "0"
+
+    first = codex.send("SessionStart")
+
+    assert rule_paths(first) == [".claude/rules/style.md", "CLAUDE.local.md"]
+    assert '<rule path="CLAUDE.local.md">\nMine.\n</rule>' in context(first)
+    assert rule_paths(codex.bash("cat pkg/a.ts")) == ["pkg/CLAUDE.local.md"]
+    assert codex.bash("cat pkg/b.ts") is None
+
+
+def test_an_import_warning_is_shown_once_per_thread_and_after_compaction(codex: Codex) -> None:
+    codex.write({"CLAUDE.local.md": "Follow @AGENTS.md\n"})
+    codex.environ["C2C_RULESYNC_LOCAL_INSTRUCTIONS"] = "1"
+
+    first = codex.send("SessionStart")
+
+    assert first is not None and "@path imports are not expanded" in first["systemMessage"]
+    assert "Follow @AGENTS.md" in context(first)
+    assert codex.bash("true") is None
+    codex.send("PostCompact")
+    again = codex.send("SessionStart", source="compact")
+    assert again is not None and "@path imports are not expanded" in again["systemMessage"]
+    assert rule_paths(again) == ["CLAUDE.local.md"]
+
+
+def test_a_thread_started_before_enabling_gets_local_instructions_after_compaction(
+    codex: Codex,
+) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n", "CLAUDE.local.md": "Mine.\n"})
+    assert rule_paths(codex.send("SessionStart")) == [".claude/rules/style.md"]
+
+    codex.environ["C2C_RULESYNC_LOCAL_INSTRUCTIONS"] = "1"
+
+    assert codex.bash("true") is None
+    codex.send("PostCompact")
+    assert rule_paths(codex.send("SessionStart", source="compact")) == [
+        ".claude/rules/style.md",
+        "CLAUDE.local.md",
+    ]
+
+
 # Tool calls ----------------------------------------------------------------------------
 
 

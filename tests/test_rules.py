@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from c2c_rulesync.rules import PROJECT, USER, Rule, RuleFinder, SessionRules
+from c2c_rulesync.rules import LOCAL, PROJECT, USER, Rule, RuleFinder, SessionRules
 
 
 def write(root: Path, files: dict[str, str]) -> None:
@@ -449,3 +449,188 @@ def test_a_worktree_that_does_not_point_back_is_not_skipped(tree: Path) -> None:
         "main/.claude/rules/main.md",
         "main/.claude/worktrees/w1/.claude/rules/main.md",
     ]
+
+
+# Local instructions (CLAUDE.local.md) -----------------------------------------------
+
+LOCAL_TREE = {
+    "CLAUDE.local.md": "Outer local.\n",
+    ".claude/rules/outer.md": UNSCOPED,
+    "proj/CLAUDE.local.md": "Project local.\n",
+    "proj/.claude/CLAUDE.local.md": "Not a place Claude Code loads from.\n",
+    "proj/.claude/rules/a.md": UNSCOPED,
+    "proj/pkg/CLAUDE.local.md": "Nested local.\n",
+    "proj/pkg/sub/CLAUDE.local.md": "Deeper local.\n",
+    "proj/pkg/sub/x.ts": "",
+    "other/CLAUDE.local.md": "Outside local.\n",
+    "other/y.ts": "",
+}
+
+
+def test_local_instructions_are_off_by_default(tree: Path) -> None:
+    write(tree, LOCAL_TREE)
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None)
+
+    assert names(finder.session_start_rules(), tree) == [
+        ".claude/rules/outer.md",
+        "proj/.claude/rules/a.md",
+    ]
+    assert finder.trigger_rules(str(tree / "proj/pkg/sub/x.ts")) == []
+
+
+def test_session_start_loads_local_instructions_after_each_directorys_rules(tree: Path) -> None:
+    write(tree, LOCAL_TREE)
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+
+    rules = finder.session_start_rules()
+
+    assert names(rules, tree) == [
+        ".claude/rules/outer.md",
+        "CLAUDE.local.md",
+        "proj/.claude/rules/a.md",
+        "proj/CLAUDE.local.md",
+    ]
+    assert [rule.source for rule in rules] == [PROJECT, LOCAL, PROJECT, LOCAL]
+
+
+def test_a_read_loads_local_instructions_of_every_directory_it_passes(tree: Path) -> None:
+    write(tree, LOCAL_TREE)
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+    session = SessionRules()
+
+    assert names(finder.trigger_rules(str(tree / "proj/pkg/sub/x.ts")), tree) == [
+        "proj/pkg/CLAUDE.local.md",
+        "proj/pkg/sub/CLAUDE.local.md",
+    ]
+    assert finder.trigger_rules(str(tree / "other/y.ts")) == []
+    session.mark_read(str(tree / "proj/pkg/CLAUDE.local.md"))
+    assert names(session.take(finder.trigger_rules(str(tree / "proj/pkg/a.ts"))), tree) == []
+
+
+def test_local_instructions_load_whatever_their_paths(tree: Path) -> None:
+    write(
+        tree,
+        {
+            "proj/CLAUDE.local.md": '---\npaths: "src/**"\n---\nProject local.\n',
+            "proj/pkg/CLAUDE.local.md": '---\npaths: "*.ts"\n---\nNested local.\n',
+            "proj/pkg/a.txt": "",
+        },
+    )
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+
+    start = finder.session_start_rules()
+    nested = finder.trigger_rules(str(tree / "proj/pkg/a.txt"))
+
+    assert names(start, tree) == ["proj/CLAUDE.local.md"]
+    assert start[0].body == "Project local.\n"
+    assert names(nested, tree) == ["proj/pkg/CLAUDE.local.md"]
+    # Claude Code reports the globs of a nested file it loads.
+    assert nested[0].globs == ("*.ts",)
+
+
+def test_empty_local_instructions_do_not_load(tree: Path) -> None:
+    write(tree, {"CLAUDE.local.md": "<!-- a note -->\n", "proj/CLAUDE.local.md": "\n  \n"})
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+
+    assert finder.session_start_rules() == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_links_to_local_instructions_are_followed_anywhere(tree: Path) -> None:
+    write(
+        tree,
+        {
+            "outside/project.md": "Linked from the project.\n",
+            "outside/nested.md": "Linked from a nested directory.\n",
+            "proj/pkg/a.ts": "",
+            "proj/broken/a.ts": "",
+        },
+    )
+    (tree / "proj/CLAUDE.local.md").symlink_to(tree / "outside/project.md")
+    (tree / "proj/pkg/CLAUDE.local.md").symlink_to(tree / "outside/nested.md")
+    (tree / "proj/broken/CLAUDE.local.md").symlink_to(tree / "missing.md")
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+
+    assert names(finder.session_start_rules(), tree) == ["outside/project.md"]
+    assert names(finder.trigger_rules(str(tree / "proj/pkg/a.ts")), tree) == ["outside/nested.md"]
+    assert finder.trigger_rules(str(tree / "proj/broken/a.ts")) == []
+    assert [warning for warning in finder.warnings if "cannot be followed" in warning] == [
+        f"{tree / 'proj/broken/CLAUDE.local.md'}: a link that cannot be followed; skipped"
+    ]
+
+
+def test_a_local_instructions_path_that_is_not_a_file_is_skipped(tree: Path) -> None:
+    (tree / "proj/CLAUDE.local.md").mkdir(parents=True)
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(tree / "CLAUDE.local.md")
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+
+    assert finder.session_start_rules() == []
+
+
+def test_local_instructions_over_4_mib_are_skipped_with_a_warning(tree: Path) -> None:
+    write(tree, {"CLAUDE.local.md": "x" * (4 * 1024 * 1024 + 1)})
+    finder = RuleFinder(str(tree), user_rules_dir=None, local_instructions=True)
+
+    assert finder.session_start_rules() == []
+    assert finder.warnings == [
+        f"{tree / 'CLAUDE.local.md'}: larger than 4 MiB; Claude Code skips it"
+    ]
+
+
+def test_a_worktree_nested_in_its_repository_keeps_local_instructions(tree: Path) -> None:
+    main = tree / "main"
+    write(
+        tree,
+        {
+            "CLAUDE.local.md": "Above the repository.\n",
+            "main/.gitignore": "CLAUDE.local.md\n",
+            "main/CLAUDE.local.md": "Main repository.\n",
+            "main/.claude/rules/main.md": UNSCOPED,
+            "main/f": "",
+        },
+    )
+    git("init", "-q", cwd=main)
+    git("add", ".", cwd=main)
+    git("commit", "-q", "-m", "init", cwd=main)
+    git("worktree", "add", "-q", ".claude/worktrees/w1", cwd=main)
+    worktree = main / ".claude/worktrees/w1"
+    write(worktree, {"CLAUDE.local.md": "Worktree.\n"})
+
+    rules = RuleFinder(str(worktree), user_rules_dir=None, local_instructions=True)
+
+    assert names(rules.session_start_rules(), tree) == [
+        "CLAUDE.local.md",
+        "main/CLAUDE.local.md",
+        "main/.claude/worktrees/w1/.claude/rules/main.md",
+        "main/.claude/worktrees/w1/CLAUDE.local.md",
+    ]
+
+
+def test_imports_in_local_instructions_are_kept_and_warned_about(tree: Path) -> None:
+    body = "See @AGENTS.md and @~/.claude/a.md, @b.md, @c.md.\n```\n@fenced.md\n```\n"
+    write(
+        tree,
+        {
+            "CLAUDE.local.md": body,
+            "proj/CLAUDE.local.md": "```\n@fenced.md\n```\n",
+            "proj/.claude/rules/r.md": "See @AGENTS.md.\n",
+        },
+    )
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+
+    rules = finder.session_start_rules()
+
+    assert [rule.body for rule in rules if rule.source == LOCAL] == [body, "```\n@fenced.md\n```\n"]
+    assert finder.warnings == [
+        f"{tree / 'CLAUDE.local.md'}: @path imports are not expanded; Codex receives this text "
+        "without the files they name (@AGENTS.md, @~/.claude/a.md, @b.md, and 1 more)"
+    ]
+
+
+def test_front_matter_of_local_instructions_raises_no_warning(tree: Path) -> None:
+    write(tree, {"CLAUDE.local.md": "---\npaths:\n  - **/*.ts\n---\nLocal.\n"})
+    finder = RuleFinder(str(tree), user_rules_dir=None, local_instructions=True)
+
+    assert names(finder.session_start_rules(), tree) == ["CLAUDE.local.md"]
+    assert finder.warnings == []

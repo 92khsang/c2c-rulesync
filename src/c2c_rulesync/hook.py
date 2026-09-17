@@ -15,6 +15,9 @@ a resumed thread still holds what it received. With
 ``C2C_RULESYNC_EPHEMERAL_RULES=0``, no event does anything in a thread whose
 payload has a null ``transcript_path``, such as a side conversation: it gets no
 rules and leaves no state.
+
+With ``C2C_RULESYNC_LOCAL_INSTRUCTIONS=1``, ``CLAUDE.local.md`` files are
+delivered with the rules, where Claude Code's ``local`` setting source loads them.
 """
 
 from __future__ import annotations
@@ -114,7 +117,11 @@ def _inject(
     from c2c_rulesync.rules import RuleFinder, SessionRules
 
     # Discovery runs before taking the lock, which parallel tool calls share.
-    finder = RuleFinder(cwd, _user_rules_dir(environ, cwd, home))
+    finder = RuleFinder(
+        cwd,
+        _user_rules_dir(environ, cwd, home),
+        local_instructions=environ.get("C2C_RULESYNC_LOCAL_INSTRUCTIONS") == "1",
+    )
     start_rules = None if start_known_done else finder.session_start_rules()
     triggered = []
     for path in touched:

@@ -8,6 +8,13 @@ Claude Code loads rules at two moments:
   plus every rule, with or without globs, of the ``.claude/rules`` directories
   strictly between the working directory and the file.
 
+With the ``local`` setting source, Claude Code also loads ``CLAUDE.local.md``
+files: at session start those of the working directory and each of its
+ancestors, and when a file is read those of the directories strictly between the
+working directory and the file. Unlike rules, their ``paths`` never keep them
+from loading, links to them are followed anywhere, and a git worktree does not
+skip them.
+
 ``RuleFinder`` reproduces both, and ``SessionRules`` keeps a session from
 loading a rule twice. Behavior and its evidence are documented in
 ``docs/behavior.md``.
@@ -20,26 +27,33 @@ import stat
 
 from c2c_rulesync.frontmatter import js_trim, parse_rule_text
 from c2c_rulesync.ignore import Matcher
+from c2c_rulesync.imports import import_references
 
-__all__ = ["PROJECT", "USER", "Rule", "RuleFinder", "SessionRules"]
+__all__ = ["LOCAL", "PROJECT", "USER", "Rule", "RuleFinder", "SessionRules"]
 
 USER = "user"
 PROJECT = "project"
+LOCAL = "local"
 
 # Claude Code skips a memory file larger than this.
 MAX_RULE_BYTES = 4 * 1024 * 1024
 # Rules directories nested deeper than this are not walked.
 MAX_DIRECTORY_DEPTH = 256
 _RULES_DIR = (".claude", "rules")
+_LOCAL_INSTRUCTIONS = "CLAUDE.local.md"
+# Import tokens named in one warning; the rest are counted.
+_LISTED_IMPORTS = 3
 
 
 class Rule:
-    """One rule file as Claude Code would load it.
+    """One rule file, or ``CLAUDE.local.md`` file, as Claude Code would load it.
 
     Attributes:
-        path: The rule file's resolved absolute path, which identifies it.
-        source: ``USER`` or ``PROJECT``.
-        globs: The rule's globs, or ``None`` for an unconditional rule.
+        path: The file's resolved absolute path, which identifies it.
+        source: ``USER`` or ``PROJECT`` for a rule, ``LOCAL`` for a
+            ``CLAUDE.local.md`` file.
+        globs: The file's globs, or ``None`` without any. A ``LOCAL`` file loads
+            whatever its globs; they only change how Claude Code reports it.
         body: The text to inject.
         warnings: Notes about how the file was interpreted.
     """
@@ -73,31 +87,43 @@ class RuleFinder:
             as the working directory for files read through it, as Claude Code
             treats ``$PWD``.
         user_rules_dir: The user rules directory, or ``None`` to skip user rules.
+        local_instructions: Whether to load ``CLAUDE.local.md`` files too, as
+            Claude Code does with the ``local`` setting source.
     """
 
-    def __init__(self, cwd: str, user_rules_dir: str | None) -> None:
+    def __init__(
+        self, cwd: str, user_rules_dir: str | None, *, local_instructions: bool = False
+    ) -> None:
         self.cwd = os.path.realpath(cwd)
         spelling = os.path.normpath(os.path.abspath(cwd))
         self._working_dirs = [self.cwd] if spelling == self.cwd else [self.cwd, spelling]
         self.user_rules_dir = user_rules_dir
+        self.local_instructions = local_instructions
         self.warnings: list[str] = []
         self._rule_cache: dict[str, Rule | None] = {}
         self._files: dict[tuple[str, str], list[str]] = {}
         self._matchers: dict[tuple[str, ...], Matcher] = {}
         self._worktree = _nested_worktree(self.cwd)
+        self._all_levels: list[str] | None = None
         self._levels: list[str] | None = None
 
     # Public API -------------------------------------------------------------
 
     def session_start_rules(self) -> list[Rule]:
-        """Rules without globs that load when a session starts, in load order."""
+        """Rules without globs that load when a session starts, in load order.
+
+        With local instructions, each directory's ``CLAUDE.local.md`` follows
+        that directory's rules.
+        """
         processed: set[str] = set()
         rules: list[Rule] = []
         if self.user_rules_dir is not None:
             rules += self._walk(self.user_rules_dir, USER, processed, conditional=False)
-        for directory in self._cwd_level_dirs():
-            rules_dir = os.path.join(directory, *_RULES_DIR)
-            rules += self._walk(rules_dir, PROJECT, processed, conditional=False)
+        for directory in self._ancestor_dirs():
+            if not self._skipped_by_worktree(directory):
+                rules_dir = os.path.join(directory, *_RULES_DIR)
+                rules += self._walk(rules_dir, PROJECT, processed, conditional=False)
+            rules += self._local_instructions(directory, processed)
         return rules
 
     def trigger_rules(self, file_path: str) -> list[Rule]:
@@ -125,6 +151,7 @@ class RuleFinder:
             rules += self._walk(rules_dir, PROJECT, unconditional_processed, conditional=False)
             rules += self._matching(target, rules_dir, PROJECT, processed)
             processed |= unconditional_processed
+            rules += self._local_instructions(directory, processed)
         for directory in self._cwd_level_dirs():
             rules_dir = os.path.join(directory, *_RULES_DIR)
             rules += self._matching(target, rules_dir, PROJECT, processed)
@@ -133,17 +160,22 @@ class RuleFinder:
     # Directories --------------------------------------------------------------
 
     def _cwd_level_dirs(self) -> list[str]:
-        """The working directory and its ancestors, filesystem root excluded, outermost first."""
-        if self._levels is not None:
-            return self._levels
-        directories = []
-        directory = self.cwd
-        while directory != os.path.dirname(directory):
-            directories.append(directory)
-            directory = os.path.dirname(directory)
-        directories.reverse()
-        self._levels = [d for d in directories if not self._skipped_by_worktree(d)]
+        """The directories of ``_ancestor_dirs`` whose rules a git worktree does not skip."""
+        if self._levels is None:
+            self._levels = [d for d in self._ancestor_dirs() if not self._skipped_by_worktree(d)]
         return self._levels
+
+    def _ancestor_dirs(self) -> list[str]:
+        """The working directory and its ancestors, filesystem root excluded, outermost first."""
+        if self._all_levels is None:
+            directories = []
+            directory = self.cwd
+            while directory != os.path.dirname(directory):
+                directories.append(directory)
+                directory = os.path.dirname(directory)
+            directories.reverse()
+            self._all_levels = directories
+        return self._all_levels
 
     def _nested_dirs(self, target: str) -> list[str]:
         """Directories between the working directory and ``target``, outermost first."""
@@ -172,6 +204,35 @@ class RuleFinder:
             any(_is_within(form, directory) for directory in self._working_dirs)
             for form in _link_forms(target)
         )
+
+    # Local instructions --------------------------------------------------------
+
+    def _local_instructions(self, directory: str, processed: set[str]) -> list[Rule]:
+        """``directory``'s ``CLAUDE.local.md``, when local instructions are on.
+
+        The file loads whatever its globs, and a link to it is followed wherever
+        it leads. A file whose body is empty after comments are removed does not
+        load.
+        """
+        if not self.local_instructions:
+            return []
+        entry = os.path.join(directory, _LOCAL_INSTRUCTIONS)
+        try:
+            mode = os.stat(entry).st_mode
+        except OSError:
+            if os.path.islink(entry):
+                self.warnings.append(f"{entry}: a link that cannot be followed; skipped")
+            return []
+        if not stat.S_ISREG(mode):
+            return []
+        path = os.path.realpath(entry)
+        if path in processed:
+            return []
+        processed.add(path)
+        rule = self._read_rule(path, LOCAL)
+        if rule is None or js_trim(rule.body) == "":
+            return []
+        return [rule]
 
     # Walking rules directories -----------------------------------------------
 
@@ -300,9 +361,13 @@ class RuleFinder:
                     data = handle.read(MAX_RULE_BYTES + 1)
                 text = data.decode("utf-8", errors="replace")
                 parsed = parse_rule_text(text)
-                warnings = parsed.warnings
+                # Front matter decides which files a rule loads for, which a
+                # CLAUDE.local.md file does not depend on.
+                warnings = () if source == LOCAL else parsed.warnings
                 if "\U0000fffd" in text and b"\xef\xbf\xbd" not in data:
                     warnings += ("not valid UTF-8; invalid bytes were replaced",)
+                if source == LOCAL and (references := import_references(parsed.body)):
+                    warnings += (_import_warning(references),)
                 rule = Rule(path, source, parsed.globs, parsed.body, warnings)
                 self.warnings.extend(f"{path}: {warning}" for warning in warnings)
         except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
@@ -343,6 +408,19 @@ class SessionRules:
         records a read before it loads the rules the read triggers.
         """
         self.loaded.add(os.path.normpath(file_path))
+
+
+def _import_warning(references: tuple[str, ...]) -> str:
+    listed = [
+        reference if len(reference) <= 100 else reference[:100] + "..."
+        for reference in references[:_LISTED_IMPORTS]
+    ]
+    if len(references) > _LISTED_IMPORTS:
+        listed.append(f"and {len(references) - _LISTED_IMPORTS} more")
+    return (
+        "@path imports are not expanded; Codex receives this text without the files "
+        f"they name ({', '.join(listed)})"
+    )
 
 
 def _strict_realpath(path: str) -> str:
