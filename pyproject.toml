@@ -1,6 +1,6 @@
 [project]
 name = "c2c-rulesync"
-version = "0.2.0"
+version = "0.3.0"
 description = "Codex CLI hook that loads Claude Code .claude/rules under the conditions Claude Code loads them"
 readme = "README.md"
 requires-python = ">=3.11"
