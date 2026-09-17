@@ -49,7 +49,9 @@ class Rule:
     """One rule file, or ``CLAUDE.local.md`` file, as Claude Code would load it.
 
     Attributes:
-        path: The file's resolved absolute path, which identifies it.
+        path: The file's resolved absolute path, which identifies it. A
+            ``CLAUDE.local.md`` reached through a link keeps the link's name in
+            its resolved directory, as Claude Code reports it.
         source: ``USER`` or ``PROJECT`` for a rule, ``LOCAL`` for a
             ``CLAUDE.local.md`` file.
         globs: The file's globs, or ``None`` without any. A ``LOCAL`` file loads
@@ -89,16 +91,23 @@ class RuleFinder:
         user_rules_dir: The user rules directory, or ``None`` to skip user rules.
         local_instructions: Whether to load ``CLAUDE.local.md`` files too, as
             Claude Code does with the ``local`` setting source.
+        home: The home directory ``@~/`` imports name, or ``None``.
     """
 
     def __init__(
-        self, cwd: str, user_rules_dir: str | None, *, local_instructions: bool = False
+        self,
+        cwd: str,
+        user_rules_dir: str | None,
+        *,
+        local_instructions: bool = False,
+        home: str | None = None,
     ) -> None:
         self.cwd = os.path.realpath(cwd)
         spelling = os.path.normpath(os.path.abspath(cwd))
         self._working_dirs = [self.cwd] if spelling == self.cwd else [self.cwd, spelling]
         self.user_rules_dir = user_rules_dir
         self.local_instructions = local_instructions
+        self.home = home
         self.warnings: list[str] = []
         self._rule_cache: dict[str, Rule | None] = {}
         self._files: dict[tuple[str, str], list[str]] = {}
@@ -110,10 +119,10 @@ class RuleFinder:
     # Public API -------------------------------------------------------------
 
     def session_start_rules(self) -> list[Rule]:
-        """Rules without globs that load when a session starts, in load order.
+        """Rules that load when a session starts, in load order.
 
-        With local instructions, each directory's ``CLAUDE.local.md`` follows
-        that directory's rules.
+        These are the rules without globs and, with local instructions, every
+        ``CLAUDE.local.md`` whatever its globs, each after its directory's rules.
         """
         processed: set[str] = set()
         rules: list[Rule] = []
@@ -225,11 +234,18 @@ class RuleFinder:
             return []
         if not stat.S_ISREG(mode):
             return []
-        path = os.path.realpath(entry)
+        # Claude Code 2.1.273 names a linked CLAUDE.local.md by the link, not by
+        # the file it leads to (G9-local-links), unlike a linked rule file.
+        path = os.path.join(os.path.realpath(directory), _LOCAL_INSTRUCTIONS)
         if path in processed:
             return []
         processed.add(path)
-        rule = self._read_rule(path, LOCAL)
+        # An import is relative to the file that holds it; for a link, either
+        # directory may be meant.
+        bases = tuple(
+            dict.fromkeys((os.path.dirname(path), os.path.dirname(_strict_realpath(path))))
+        )
+        rule = self._read_rule(path, LOCAL, bases)
         if rule is None or js_trim(rule.body) == "":
             return []
         return [rule]
@@ -347,18 +363,19 @@ class RuleFinder:
             elif stat.S_ISREG(mode) and name.endswith(".md"):
                 files.append(resolved)
 
-    def _read_rule(self, path: str, source: str) -> Rule | None:
+    def _read_rule(self, path: str, source: str, import_bases: tuple[str, ...] = ()) -> Rule | None:
         key = f"{source}\0{path}"
         if key in self._rule_cache:
             return self._rule_cache[key]
         rule = None
         try:
-            size = os.path.getsize(path)
-            if size > MAX_RULE_BYTES:
+            # The length read decides, since a file can grow after it is listed
+            # and some files report no size at all.
+            with open(path, "rb") as handle:
+                data = handle.read(MAX_RULE_BYTES + 1)
+            if len(data) > MAX_RULE_BYTES:
                 self.warnings.append(f"{path}: larger than 4 MiB; Claude Code skips it")
             else:
-                with open(path, "rb") as handle:
-                    data = handle.read(MAX_RULE_BYTES + 1)
                 text = data.decode("utf-8", errors="replace")
                 parsed = parse_rule_text(text)
                 # Front matter decides which files a rule loads for, which a
@@ -366,7 +383,12 @@ class RuleFinder:
                 warnings = () if source == LOCAL else parsed.warnings
                 if "\U0000fffd" in text and b"\xef\xbf\xbd" not in data:
                     warnings += ("not valid UTF-8; invalid bytes were replaced",)
-                if source == LOCAL and (references := import_references(parsed.body)):
+                references = tuple(
+                    reference
+                    for reference in (import_references(parsed.body) if source == LOCAL else ())
+                    if _names_file(reference, import_bases, self.home)
+                )
+                if references:
                     warnings += (_import_warning(references),)
                 rule = Rule(path, source, parsed.globs, parsed.body, warnings)
                 self.warnings.extend(f"{path}: {warning}" for warning in warnings)
@@ -408,6 +430,16 @@ class SessionRules:
         records a read before it loads the rules the read triggers.
         """
         self.loaded.add(os.path.normpath(file_path))
+
+
+def _names_file(reference: str, bases: tuple[str, ...], home: str | None) -> bool:
+    """Whether an ``@path`` import names an existing file, which Claude Code would load."""
+    target = reference[1:]
+    if target == "~" or target.startswith("~/"):
+        if home is None:
+            return False
+        target = home + target[1:]
+    return any(os.path.isfile(os.path.join(base, target)) for base in bases)
 
 
 def _import_warning(references: tuple[str, ...]) -> str:

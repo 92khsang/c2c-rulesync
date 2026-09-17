@@ -551,12 +551,28 @@ def test_links_to_local_instructions_are_followed_anywhere(tree: Path) -> None:
     (tree / "proj/broken/CLAUDE.local.md").symlink_to(tree / "missing.md")
     finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
 
-    assert names(finder.session_start_rules(), tree) == ["outside/project.md"]
-    assert names(finder.trigger_rules(str(tree / "proj/pkg/a.ts")), tree) == ["outside/nested.md"]
+    assert names(finder.session_start_rules(), tree) == ["proj/CLAUDE.local.md"]
+    assert names(finder.trigger_rules(str(tree / "proj/pkg/a.ts")), tree) == [
+        "proj/pkg/CLAUDE.local.md"
+    ]
     assert finder.trigger_rules(str(tree / "proj/broken/a.ts")) == []
     assert [warning for warning in finder.warnings if "cannot be followed" in warning] == [
         f"{tree / 'proj/broken/CLAUDE.local.md'}: a link that cannot be followed; skipped"
     ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_reading_a_linked_local_instructions_file_by_its_link_counts_as_loading_it(
+    tree: Path,
+) -> None:
+    write(tree, {"proj/shared/lib.md": "Linked.\n", "proj/lib/a.ts": ""})
+    (tree / "proj/lib/CLAUDE.local.md").symlink_to(tree / "proj/shared/lib.md")
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+    session = SessionRules()
+
+    session.mark_read(str(tree / "proj/lib/CLAUDE.local.md"))
+
+    assert session.take(finder.trigger_rules(str(tree / "proj/lib/a.ts"))) == []
 
 
 def test_a_local_instructions_path_that_is_not_a_file_is_skipped(tree: Path) -> None:
@@ -613,11 +629,19 @@ def test_imports_in_local_instructions_are_kept_and_warned_about(tree: Path) -> 
         tree,
         {
             "CLAUDE.local.md": body,
+            "AGENTS.md": "",
+            "home/.claude/a.md": "",
+            "b.md": "",
+            "c.md": "",
             "proj/CLAUDE.local.md": "```\n@fenced.md\n```\n",
+            "proj/fenced.md": "",
             "proj/.claude/rules/r.md": "See @AGENTS.md.\n",
+            "proj/AGENTS.md": "",
         },
     )
-    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+    finder = RuleFinder(
+        str(tree / "proj"), user_rules_dir=None, local_instructions=True, home=str(tree / "home")
+    )
 
     rules = finder.session_start_rules()
 
@@ -626,6 +650,42 @@ def test_imports_in_local_instructions_are_kept_and_warned_about(tree: Path) -> 
         f"{tree / 'CLAUDE.local.md'}: @path imports are not expanded; Codex receives this text "
         "without the files they name (@AGENTS.md, @~/.claude/a.md, @b.md, and 1 more)"
     ]
+
+
+def test_imports_that_name_no_file_are_not_warned_about(tree: Path) -> None:
+    write(
+        tree,
+        {
+            "CLAUDE.local.md": (
+                "Ping @alice, use @Override and @types/node, see @docs and @~/x.md.\n"
+            ),
+            "docs/a.md": "",
+            "x.md": "",
+        },
+    )
+    finder = RuleFinder(str(tree), user_rules_dir=None, local_instructions=True)
+
+    assert names(finder.session_start_rules(), tree) == ["CLAUDE.local.md"]
+    assert finder.warnings == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_imports_of_a_linked_file_are_found_beside_the_link_or_its_target(tree: Path) -> None:
+    write(
+        tree,
+        {
+            "notes/local.md": "See @beside-target.md and @beside-link.md and @nowhere.md.\n",
+            "notes/beside-target.md": "",
+            "proj/beside-link.md": "",
+        },
+    )
+    (tree / "proj/CLAUDE.local.md").symlink_to(tree / "notes/local.md")
+    finder = RuleFinder(str(tree / "proj"), user_rules_dir=None, local_instructions=True)
+
+    finder.session_start_rules()
+
+    assert len(finder.warnings) == 1
+    assert "(@beside-target.md, @beside-link.md)" in finder.warnings[0]
 
 
 def test_front_matter_of_local_instructions_raises_no_warning(tree: Path) -> None:

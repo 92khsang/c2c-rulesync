@@ -7,7 +7,7 @@ rebuild every tree and check that c2c-rulesync predicts the same loads.
 
 A probe whose ``setting_sources`` include ``local`` also loaded CLAUDE.local.md
 files, and the files they import. c2c-rulesync does not expand imports; it warns
-about them, so each imported file must be named by that warning instead.
+about them, so the warning must name each imported file instead.
 """
 
 from __future__ import annotations
@@ -96,6 +96,17 @@ def canonical(root: Path, relative: str) -> str:
     return os.path.relpath(os.path.realpath(root / relative), root)
 
 
+def recorded_file(root: Path, load: dict[str, Any]) -> str:
+    """The file of a recorded load as c2c-rulesync names it.
+
+    Claude Code names a rule file by its resolved path and a CLAUDE.local.md by
+    the path it was found at, a link included.
+    """
+    if load.get("memory_type") == "Local":
+        return os.path.normpath(str(load["file"]))
+    return canonical(root, load["file"])
+
+
 def test_the_recording_is_for_the_current_cases() -> None:
     assert GOLDEN["cases_sha256"] == hashlib.sha256(CASES_BYTES).hexdigest(), (
         "tests/parity/cases.json changed; rerun scripts/claude_parity_oracle.py"
@@ -146,13 +157,13 @@ def test_rule_loads_match_claude_code(
     loaded = [load for load in recorded["lazy"] if load["load_reason"] != "include"]
     expected_lazy = LAZY_DIVERGENCES.get((case["id"], probe_key(probe)), loaded)
     assert sorted_entries(session_start) == sorted_entries(
-        [{"file": canonical(root, load["file"])} for load in recorded["session_start"]]
+        [{"file": recorded_file(root, load)} for load in recorded["session_start"]]
     )
     assert sorted_entries(lazy) == sorted_entries(
         [
             {
                 **{k: v for k, v in load.items() if k != "memory_type"},
-                "file": canonical(root, load["file"]),
+                "file": recorded_file(root, load),
             }
             for load in expected_lazy
         ]
@@ -162,6 +173,7 @@ def test_rule_loads_match_claude_code(
         for rule in delivered
         if rule.source == LOCAL
         for token in import_references(rule.body)
+        if any(token in warning for warning in rule.warnings)
     }
     assert {canonical(root, load["file"]) for load in imported} <= warned
 

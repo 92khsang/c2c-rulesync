@@ -121,6 +121,7 @@ def _inject(
         cwd,
         _user_rules_dir(environ, cwd, home),
         local_instructions=environ.get("C2C_RULESYNC_LOCAL_INSTRUCTIONS") == "1",
+        home=home,
     )
     start_rules = None if start_known_done else finder.session_start_rules()
     triggered = []

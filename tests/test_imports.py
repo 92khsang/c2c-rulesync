@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from c2c_rulesync.imports import import_references
@@ -82,6 +84,9 @@ def test_fenced_code_blocks_hold_no_imports(body: str, expected: tuple[str, ...]
         ("`a` @b.md `c`\n", ("@b.md",)),
         ("@x`span` @y.md\n", ("@x", "@y.md")),
         ("@`span`\n", ()),
+        ("Run `uv run\npytest` and follow @docs/testing.md for `ruff`.\n", ("@docs/testing.md",)),
+        ("A `span\n@inside.md` here.\n", ("@inside.md`",)),
+        ("A `span\n\n@after-blank.md` here.\n", ("@after-blank.md`",)),
     ],
     ids=[
         "span",
@@ -92,7 +97,18 @@ def test_fenced_code_blocks_hold_no_imports(body: str, expected: tuple[str, ...]
         "between",
         "span-inside-token",
         "only-a-span-after-at",
+        "span-across-lines",
+        "line-scan-still-counts",
+        "blank-line-ends-a-paragraph",
     ],
 )
 def test_code_spans_hold_no_imports(body: str, expected: tuple[str, ...]) -> None:
     assert import_references(body) == expected
+
+
+def test_many_unmatched_backtick_strings_take_linear_time() -> None:
+    body = " ".join("`" * length for length in range(2, 500)) + " `x`" * 50_000 + " @a.md\n"
+
+    started = time.monotonic()
+    assert import_references(body) == ("@a.md",)
+    assert time.monotonic() - started < 1.0

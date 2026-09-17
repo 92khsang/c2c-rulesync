@@ -18,8 +18,9 @@ against c2c-rulesync offline.
 The run calls a paid model and uses the developer's Claude Code login, so it is
 never run in CI. Project-level cases only: the developer's own user-level
 rules and settings are excluded with ``--setting-sources project``. A probe's
-``setting_sources`` replaces that value; the G9 probes add ``local`` so that
-Claude Code loads CLAUDE.local.md files.
+``setting_sources`` replaces that value: all G9 probes but one add ``local`` so
+that Claude Code loads CLAUDE.local.md files, and the remaining one records that
+none load without it.
 
 Usage:
     python3 scripts/claude_parity_oracle.py --claude-bin ~/.local/share/claude/versions/2.1.273

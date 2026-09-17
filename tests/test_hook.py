@@ -206,7 +206,7 @@ def test_local_instructions_are_delivered_like_rules(codex: Codex) -> None:
 
 
 def test_an_import_warning_is_shown_once_per_thread_and_after_compaction(codex: Codex) -> None:
-    codex.write({"CLAUDE.local.md": "Follow @AGENTS.md\n"})
+    codex.write({"CLAUDE.local.md": "Follow @AGENTS.md\n", "AGENTS.md": "Agents.\n"})
     codex.environ["C2C_RULESYNC_LOCAL_INSTRUCTIONS"] = "1"
 
     first = codex.send("SessionStart")
