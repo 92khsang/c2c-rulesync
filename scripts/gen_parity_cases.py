@@ -14,13 +14,16 @@ Claude Code session starts in, and probes: the files one session reads. Groups:
 - G8: each rule loads once per session.
 - G9: CLAUDE.local.md, recorded with the `local` setting source and one probe
   without it.
+- G10: claudeMdExcludes: pattern syntax, the loads it applies to, and links.
 
 Later G1, G4, G5, G6 and G8 cases cover links inside linked directories, reads
 through links, worktree edge cases, file names and additional directories.
 
 User rules (`~/.claude/rules`) are not recorded: the sessions run with project
 settings only, under the developer's own login and configuration directory. A
-probe's `setting_sources` replaces the default `project`.
+probe's `setting_sources` replaces the default `project`. For the same reason
+G10 puts claudeMdExcludes in the working directory's `.claude/settings.json`,
+where `{root}` in the text stands for the case root.
 
 Usage:
     python3 scripts/gen_parity_cases.py tests/parity/cases.json
@@ -821,6 +824,242 @@ cases.append(
             },
         ],
         "probes": [{"read": ["M/.claude/worktrees/w1/f"], "setting_sources": LOCAL}],
+    }
+)
+
+# G10: claudeMdExcludes ---------------------------------------------------------------
+# Each probe's working directory holds the patterns in its .claude/settings.json. No
+# pattern may match the working directory's CLAUDE.md, the oracle's control file.
+
+
+def excludes(*patterns: object) -> str:
+    return json.dumps({"claudeMdExcludes": list(patterns)}, indent=1) + "\n"
+
+
+cases.append(
+    {
+        "id": "G10-excludes-home",
+        "group": "G10",
+        "cwd": "H/work/proj",
+        "tree": {
+            "H/.claude/rules/context7.md": "G10a home unconditional\n",
+            "H/.claude/rules/comments-python.md": scoped('paths: "**/*.py"', "G10a home python"),
+            "H/work/.claude/rules/keep.md": "G10a work unconditional\n",
+            "H/work/.claude/rules/py.md": scoped('paths: "**/*.py"', "G10a work python"),
+            "H/work/proj/.claude/settings.json": excludes("{root}/H/.claude/rules/**"),
+            "H/work/proj/src/a.py": "a\n",
+            "H/work/lit/.claude/settings.json": excludes("{root}/H/.claude/rules/context7.md"),
+            "H/work/lit/a.py": "a\n",
+        },
+        "probes": [
+            {"read": ["H/work/proj/src/a.py"]},
+            {"read": ["H/work/lit/a.py"], "cwd": "H/work/lit"},
+        ],
+    }
+)
+
+W = "A/B/proj"
+R = "{root}/A/B/proj/.claude/rules"
+cases.append(
+    {
+        "id": "G10-excludes-patterns",
+        "group": "G10",
+        "cwd": W,
+        "tree": {
+            "CLAUDE.local.md": "G10b root local kept\n",
+            "A/CLAUDE.local.md": "G10b ancestor local, leading globstar\n",
+            "A/B/CLAUDE.local.md": "G10b ancestor local, literal\n",
+            f"{W}/CLAUDE.local.md": "G10b cwd local, literal\n",
+            f"{W}/.claude/rules/kept.md": "G10b kept\n",
+            f"{W}/.claude/rules/literal.md": "G10b literal\n",
+            f"{W}/.claude/rules/midstar.md": "G10b globstar across .claude\n",
+            f"{W}/.claude/rules/leadstar.md": "G10b leading globstar across .claude\n",
+            f"{W}/.claude/rules/stardot.md": "G10b star for .claude\n",
+            f"{W}/.claude/rules/zero.md": "G10b globstar for no directory\n",
+            f"{W}/.claude/rules/tail/tail-1.md": "G10b trailing globstar depth 1\n",
+            f"{W}/.claude/rules/tail/deeper/tail-2.md": "G10b trailing globstar depth 2\n",
+            f"{W}/.claude/rules/star/star-1.md": "G10b trailing star depth 1\n",
+            f"{W}/.claude/rules/star/sub/star-2.md": "G10b trailing star depth 2\n",
+            f"{W}/.claude/rules/dir/dir-1.md": "G10b directory pattern\n",
+            f"{W}/.claude/rules/slashdir/slashdir-1.md": "G10b directory pattern with slash\n",
+            f"{W}/.claude/rules/rel.md": "G10b relative pattern\n",
+            f"{W}/.claude/rules/relbase.md": "G10b bare name pattern\n",
+            f"{W}/.claude/rules/case.md": "G10b pattern in other case\n",
+            f"{W}/nest/.claude/rules/nest-excluded.md": "G10b nested literal\n",
+            f"{W}/nest/.claude/rules/nest-kept.md": "G10b nested kept\n",
+            f"{W}/nest/CLAUDE.local.md": "G10b nested local literal\n",
+            f"{W}/nest/x.txt": "x\n",
+            f"{W}/cond/.claude/rules/cond-excluded.md": scoped(
+                'paths: "*.py"', "G10b scoped literal"
+            ),
+            f"{W}/cond/.claude/rules/cond-kept.md": scoped('paths: "*.py"', "G10b scoped kept"),
+            f"{W}/cond/CLAUDE.local.md": "G10b nested local kept\n",
+            f"{W}/cond/x.py": "x\n",
+            f"{W}/packages/web/.claude/rules/web.md": "G10b documented package pattern rule\n",
+            f"{W}/packages/web/CLAUDE.local.md": "G10b documented package pattern local\n",
+            f"{W}/packages/web/x.txt": "x\n",
+            f"{W}/.claude/settings.json": excludes(
+                "**/A/CLAUDE.local.md",
+                "{root}/A/B/CLAUDE.local.md",
+                "{root}/A/B/proj/CLAUDE.local.md",
+                R + "/literal.md",
+                "{root}/A/**/midstar.md",
+                "**/leadstar.md",
+                "{root}/A/B/proj/*/rules/stardot.md",
+                R + "/**/zero.md",
+                R + "/tail/**",
+                R + "/star/*",
+                R + "/dir",
+                R + "/slashdir/",
+                ".claude/rules/rel.md",
+                "relbase.md",
+                R + "/CASE.md",
+                "{root}/A/B/proj/nest/.claude/rules/nest-excluded.md",
+                "{root}/A/B/proj/nest/CLAUDE.local.md",
+                "{root}/A/B/proj/cond/.claude/rules/cond-excluded.md",
+                "**/packages/web/**",
+            ),
+        },
+        "probes": [
+            {
+                "read": [f"{W}/nest/x.txt", f"{W}/cond/x.py", f"{W}/packages/web/x.txt"],
+                "setting_sources": LOCAL,
+            }
+        ],
+    }
+)
+
+Y = "{root}/proj/.claude/rules"
+syntax_tree: dict[str, Any] = {
+    f"proj/.claude/rules/{name}.md": f"G10c {name}\n"
+    for name in (
+        "lit",
+        "kept",
+        "q1",
+        "q12",
+        "brace-a",
+        "brace-c",
+        "nb-z",
+        "nb-w",
+        "rg-2",
+        "rg-5",
+        "cls-a",
+        "cls-c",
+        "rng-b",
+        "rng-d",
+        "neg-a",
+        "neg-b",
+        "caret-a",
+        "caret-b",
+        "dbl-xy",
+        "dbl-dir/deep",
+    )
+}
+syntax_tree[f"proj/{S}"] = "sentinel\n"
+syntax_tree["proj/.claude/settings.json"] = excludes(
+    Y + "/lit.md",
+    Y + "/q?.md",
+    Y + "/brace-{a,b}.md",
+    Y + "/nb-{x,{y,z}}.md",
+    Y + "/rg-{1..3}.md",
+    Y + "/cls-[ab].md",
+    Y + "/rng-[a-c].md",
+    Y + "/neg-[!a].md",
+    Y + "/caret-[^a].md",
+    Y + "/dbl**.md",
+)
+cases.append(
+    {
+        "id": "G10-excludes-syntax",
+        "group": "G10",
+        "cwd": "proj",
+        "tree": syntax_tree,
+        "probes": [{"read": [f"proj/{S}"]}],
+    }
+)
+
+cases.append(
+    {
+        "id": "G10-excludes-links",
+        "group": "G10",
+        "cwd": "P/proj",
+        "requires": ["symlink"],
+        "tree": {
+            "CLAUDE.local.md": "G10d root local kept\n",
+            "p-local.md": "G10d ancestor local, pattern on the link\n",
+            "P/CLAUDE.local.md": {"symlink": "../p-local.md"},
+            "cwd-local.md": "G10d cwd local, pattern on the target\n",
+            "P/proj/CLAUDE.local.md": {"symlink": "../../cwd-local.md"},
+            "alias": {"symlink": "P/proj"},
+            "P/proj/.claude/rules/kept.md": "G10d kept\n",
+            "P/proj/.claude/rules/via-alias.md": "G10d pattern through a linked directory\n",
+            "P/proj/shared/via-link.md": "G10d pattern on the link\n",
+            "P/proj/.claude/rules/l-via-link.md": {"symlink": "../../shared/via-link.md"},
+            "P/proj/shared/via-target.md": "G10d pattern on the target\n",
+            "P/proj/.claude/rules/l-via-target.md": {"symlink": "../../shared/via-target.md"},
+            "P/proj/shared-dir/dir-link.md": "G10d linked dir, pattern on the link path\n",
+            "P/proj/shared-dir/dir-target.md": "G10d linked dir, pattern on the target\n",
+            "P/proj/shared-dir/dir-kept.md": "G10d linked dir kept\n",
+            "P/proj/.claude/rules/l-dir": {"symlink": "../../shared-dir"},
+            "P/proj/.claude/rules/shadow.md": scoped('paths: "pkg/src/*.ts"', "G10d shadow"),
+            "P/proj/shared/lazy.md": "G10d nested link, pattern on the link\n",
+            "P/proj/pkg/.claude/rules/l-shadow.md": {"symlink": "../../../.claude/rules/shadow.md"},
+            "P/proj/pkg/.claude/rules/l-lazy.md": {"symlink": "../../../shared/lazy.md"},
+            "P/proj/pkg/.claude/rules/pkg-kept.md": "G10d nested kept\n",
+            "P/proj/pkg/src/x.ts": "x\n",
+            "P/proj/.claude/settings.json": excludes(
+                "{root}/P/CLAUDE.local.md",
+                "{root}/cwd-local.md",
+                "{root}/alias/.claude/rules/via-alias.md",
+                "{root}/P/proj/.claude/rules/l-via-link.md",
+                "{root}/P/proj/shared/via-target.md",
+                "{root}/P/proj/.claude/rules/l-dir/dir-link.md",
+                "{root}/P/proj/shared-dir/dir-target.md",
+                "{root}/P/proj/pkg/.claude/rules/l-shadow.md",
+                "{root}/P/proj/pkg/.claude/rules/l-lazy.md",
+            ),
+            "Q/rules-real/x-link.md": "G10d linked rules dir, pattern on the link path\n",
+            "Q/rules-real/x-target.md": "G10d linked rules dir, pattern on the target\n",
+            "Q/rules-real/x-kept.md": "G10d linked rules dir kept\n",
+            "Q/.claude/rules": {"symlink": "../rules-real"},
+            "Q/.claude/settings.json": excludes(
+                "{root}/Q/.claude/rules/x-link.md", "{root}/Q/rules-real/x-target.md"
+            ),
+            f"Q/{S}": "sentinel\n",
+        },
+        "probes": [
+            {"read": ["P/proj/pkg/src/x.ts"], "setting_sources": LOCAL},
+            {"read": [f"Q/{S}"], "cwd": "Q"},
+        ],
+    }
+)
+cases.append(
+    {
+        "id": "G10-excludes-settings",
+        "group": "G10",
+        "cwd": "proj",
+        "tree": {
+            "proj/.claude/rules/good.md": "G10e string pattern beside a number\n",
+            "proj/.claude/rules/kept.md": "G10e kept\n",
+            "proj/.claude/settings.json": excludes("{root}/proj/.claude/rules/good.md", 5),
+            f"proj/{S}": "sentinel\n",
+        },
+        "probes": [{"read": [f"proj/{S}"]}],
+    }
+)
+cases.append(
+    {
+        "id": "G10-excludes-tilde",
+        "group": "G10",
+        "cwd": "H/work",
+        "requires": ["claude_config_dir"],
+        "tree": {
+            "H/work/.claude/rules/tilde.md": "G10f pattern under ~\n",
+            "H/work/.claude/rules/kept.md": "G10f kept\n",
+            "H/work/.claude/settings.json": excludes("~/work/.claude/rules/tilde.md"),
+            f"H/work/{S}": "sentinel\n",
+        },
+        "probes": [{"read": [f"H/work/{S}"], "env": {"HOME": "{root}/H"}}],
     }
 )
 

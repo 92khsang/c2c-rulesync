@@ -84,7 +84,7 @@ def build_tree(root: Path, case: dict[str, Any]) -> None:
         elif isinstance(content, dict) and "base64" in content:
             path.write_bytes(base64.b64decode(content["base64"]))
         else:
-            path.write_text(content, encoding="utf-8", newline="")
+            path.write_text(content.replace("{root}", str(root)), encoding="utf-8", newline="")
     for command in case.get("setup", []):
         subprocess.run(
             command["run"], cwd=root / command.get("cwd", "."), check=True, capture_output=True
