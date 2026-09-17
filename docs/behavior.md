@@ -27,8 +27,10 @@ adds (sorting, warnings, the depth limit), are not.
 
 ### Where rules live
 
-- **User rules** live in one directory, `~/.claude/rules` by default. Their
-  globs match paths relative to the session's working directory.
+- **User rules** live in one directory: `~/.claude/rules`, or `rules` under
+  the directory `CLAUDE_CONFIG_DIR` names, which moves every `~/.claude` path
+  ([documented](https://code.claude.com/docs/en/claude-directory)). Their globs
+  match paths relative to the session's working directory.
 - **Project rules** live in a `.claude/rules` directory of the working
   directory, of any of its ancestors except the filesystem root, or of any
   directory below the working directory. Their globs match paths relative to
@@ -73,6 +75,21 @@ reached twice, for example through a link, loads once. When the user rules
 directory is also a project rules directory, as `~/.claude/rules` is for a
 session under the home directory, the user copy loads first and wins; this
 follows from the load order and has not been checked in a session.
+
+When `CLAUDE_CONFIG_DIR` moves the user rules elsewhere, `~/.claude/rules` is
+still the project rules directory of the home directory. A session under the
+home directory then loads its rules as project rules besides the user rules,
+and a rule file copied into both directories loads twice, even when the two
+copies are identical; entries that resolve to the same file load once, and a
+link in `~/.claude/rules` leaving the working directory is skipped, as for any
+ancestor rules directory ([Links](#links)). This was observed in Claude Code
+2.1.274, not the 2.1.273 target (September 2026): with
+`CLAUDE_CONFIG_DIR=~/.claude-extra` and a working directory under the home
+directory, reading a `.py` file loaded both
+`~/.claude-extra/rules/comments-python.md` and
+`~/.claude/rules/comments-python.md`, and the rules without `paths:` in
+`~/.claude/rules` were listed as project instructions. c2c-rulesync tells rule
+files apart by resolved path and does the same.
 
 A rule file is skipped when its body is empty after front matter and comments
 are removed, or when it is larger than 4 MiB (c2c-rulesync warns). Invalid

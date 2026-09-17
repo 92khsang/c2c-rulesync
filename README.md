@@ -7,9 +7,10 @@ under the same conditions Claude Code 2.1.273 loads them.
   subagent starts.
 - Rules with `paths:` are injected the first time a tool call reads or edits a
   matching file, with Claude Code's glob semantics.
-- Rules come from `~/.claude/rules`, from the `.claude/rules` of the working
-  directory and its ancestors, and from `.claude/rules` directories below the
-  working directory that a touched file lives under.
+- Rules come from `~/.claude/rules` (or `$CLAUDE_CONFIG_DIR/rules`), from the
+  `.claude/rules` of the working directory and its ancestors, and from
+  `.claude/rules` directories below the working directory that a touched file
+  lives under.
 
 [docs/behavior.md](docs/behavior.md) specifies what loads when, and every known
 difference from Claude Code.
@@ -87,17 +88,42 @@ changing any of these lines.
 
 ## Environment
 
-Codex hooks see the environment Codex was started with, so set these before
-starting Codex:
+Codex hooks see the environment Codex was started with. Set these before
+starting Codex, or for one project in front of its hook command (see
+[Settings for one project](#settings-for-one-project)):
 
 | Variable | Effect |
 |---|---|
-| `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. |
+| `CLAUDE_CONFIG_DIR` | As in Claude Code: user rules are read from `$CLAUDE_CONFIG_DIR/rules` instead of `~/.claude/rules`. A hook that does not see the variable, for example because only a shell function or alias sets it for `claude`, uses `~/.claude/rules`. A working directory under the home directory still loads `~/.claude/rules` as project rules, as Claude Code does. |
 | `C2C_RULESYNC_USER_RULES` | `0` turns user rules off. |
 | `C2C_RULESYNC_STATE_DIR` | An absolute directory, used only by c2c-rulesync, for the record of what each session received. A relative value is ignored. The default is `$XDG_STATE_HOME/c2c-rulesync`, or `~/.local/state/c2c-rulesync`. |
 
 If the record cannot be written, the hook says so when a session starts and
 delivers only rules without `paths:`.
+
+### Settings for one project
+
+Codex runs a hook command with the user's shell, so a project can set these
+variables in front of the command, in every c2c-rulesync handler of its
+`.codex/config.toml`. For a project used only with a second Claude Code account
+whose configuration lives in `~/.claude-extra`, write
+`command = 'CLAUDE_CONFIG_DIR="$HOME/.claude-extra" c2c-rulesync hook'`.
+
+- Codex runs the hooks of every configuration layer together: a project's
+  hooks do not replace those in `~/.codex`
+  ([Codex hooks](https://developers.openai.com/codex/hooks)). Wire c2c-rulesync
+  only in project configuration; a handler left in `~/.codex/config.toml` or
+  `~/.codex/hooks.json` still runs beside the project's, with the environment
+  Codex started with, so the variables do not take effect.
+- Write `$HOME` rather than `~`: no shell expands `~` inside quotes, as in
+  `"~/.claude-extra"`, and dash and zsh do not expand it in
+  `env VARIABLE=~/x command`.
+- The `VARIABLE=value command` form needs a POSIX-style shell such as bash or
+  zsh.
+- Trust a changed command again with `/hooks`; until then Codex does not run it.
+- Under the home directory, `~/.claude/rules` still loads as project rules, so a
+  rule copied into both directories loads twice
+  ([docs/behavior.md](docs/behavior.md#when-rules-load)).
 
 ## What Codex sees
 
