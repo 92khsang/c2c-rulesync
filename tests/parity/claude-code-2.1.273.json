@@ -1280,8 +1280,229 @@
      "session_start": []
     }
    }
+  },
+  "G9-local-imports": {
+   "probes": {
+    "proj/zz-sentinel.txt --setting-sources project,local": {
+     "lazy": [
+      {
+       "file": "proj/notes/inline.md",
+       "load_reason": "include",
+       "memory_type": "Local"
+      },
+      {
+       "file": "proj/notes/line.md",
+       "load_reason": "include",
+       "memory_type": "Local"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "proj/CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    }
+   }
+  },
+  "G9-local-levels": {
+   "probes": {
+    "A/B/other/a.txt --setting-sources project,local": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "A/B/proj/.claude/rules/r.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "A/CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    },
+    "A/B/proj/pkg/CLAUDE.local.md --setting-sources project,local": {
+     "lazy": [
+      {
+       "file": "A/B/proj/pkg/.claude/rules/r.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/B/proj/pkg/CLAUDE.local.md"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/B/proj/.claude/rules/r.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "A/CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    },
+    "A/B/proj/pkg/a.txt+A/B/proj/deep/sub/a.txt+A/B/proj/blank/a.txt": {
+     "lazy": [
+      {
+       "file": "A/B/proj/pkg/.claude/rules/r.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/B/proj/pkg/a.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/B/proj/.claude/rules/r.md",
+       "memory_type": "Project"
+      }
+     ]
+    },
+    "A/B/proj/pkg/a.txt+A/B/proj/deep/sub/a.txt+A/B/proj/blank/a.txt --setting-sources project,local": {
+     "lazy": [
+      {
+       "file": "A/B/proj/deep/CLAUDE.local.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Local",
+       "trigger": "A/B/proj/deep/sub/a.txt"
+      },
+      {
+       "file": "A/B/proj/pkg/.claude/rules/r.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Project",
+       "trigger": "A/B/proj/pkg/a.txt"
+      },
+      {
+       "file": "A/B/proj/pkg/CLAUDE.local.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Local",
+       "trigger": "A/B/proj/pkg/a.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/B/proj/.claude/rules/r.md",
+       "memory_type": "Project"
+      },
+      {
+       "file": "A/B/proj/CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "A/CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    }
+   }
+  },
+  "G9-local-links": {
+   "probes": {
+    "proj/pkg/a.txt+proj/lib/a.txt+proj/broken/a.txt --setting-sources project,local": {
+     "lazy": [
+      {
+       "file": "proj/lib/CLAUDE.local.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Local",
+       "trigger": "proj/lib/a.txt"
+      },
+      {
+       "file": "proj/pkg/CLAUDE.local.md",
+       "load_reason": "nested_traversal",
+       "memory_type": "Local",
+       "trigger": "proj/pkg/a.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "proj/CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    }
+   }
+  },
+  "G9-local-paths": {
+   "probes": {
+    "A/proj/src/a.ts+A/proj/pkg/a.txt+A/proj/lib/b.ts+A/proj/doc/c.ts --setting-sources project,local": {
+     "lazy": [
+      {
+       "file": "A/proj/doc/CLAUDE.local.md",
+       "globs": [
+        "/doc/c.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Local",
+       "trigger": "A/proj/doc/c.ts"
+      },
+      {
+       "file": "A/proj/lib/CLAUDE.local.md",
+       "globs": [
+        "/b.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Local",
+       "trigger": "A/proj/lib/b.ts"
+      },
+      {
+       "file": "A/proj/pkg/CLAUDE.local.md",
+       "globs": [
+        "*.ts"
+       ],
+       "load_reason": "path_glob_match",
+       "memory_type": "Local",
+       "trigger": "A/proj/pkg/a.txt"
+      }
+     ],
+     "session_start": [
+      {
+       "file": "A/CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "A/proj/CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    }
+   }
+  },
+  "G9-local-worktree": {
+   "probes": {
+    "M/.claude/worktrees/w1/f --setting-sources project,local": {
+     "lazy": [],
+     "session_start": [
+      {
+       "file": "CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "M/.claude/worktrees/CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "M/.claude/worktrees/w1/CLAUDE.local.md",
+       "memory_type": "Local"
+      },
+      {
+       "file": "M/CLAUDE.local.md",
+       "memory_type": "Local"
+      }
+     ]
+    }
+   }
   }
  },
- "cases_sha256": "378704b2bfbb17e7986b9b18d595acb589808fb5a63470476c7164b619261453",
+ "cases_sha256": "40973b1fe5a9e36545ecf6389b09fe258a94a7d0a074033749909b1f793f0ba6",
  "claude_code": "2.1.273"
 }

@@ -12,12 +12,15 @@ Claude Code session starts in, and probes: the files one session reads. Groups:
 - G5: a git worktree nested in its repository.
 - G6: links.
 - G8: each rule loads once per session.
+- G9: CLAUDE.local.md, recorded with the `local` setting source and one probe
+  without it.
 
 Later G1, G4, G5, G6 and G8 cases cover links inside linked directories, reads
 through links, worktree edge cases, file names and additional directories.
 
 User rules (`~/.claude/rules`) are not recorded: the sessions run with project
-settings only, under the developer's own login and configuration directory.
+settings only, under the developer's own login and configuration directory. A
+probe's `setting_sources` replaces the default `project`.
 
 Usage:
     python3 scripts/gen_parity_cases.py tests/parity/cases.json
@@ -664,6 +667,160 @@ cases.append(
             "alias": {"symlink": "proj"},
         },
         "probes": [{"read": ["alias/src/a.ts"], "env": {"PWD": "{root}/alias"}}],
+    }
+)
+
+# G9: CLAUDE.local.md, loaded only with the `local` setting source ------------------
+LOCAL = "project,local"
+cases.append(
+    {
+        "id": "G9-local-levels",
+        "group": "G9",
+        "cwd": "A/B/proj",
+        "tree": {
+            "A/CLAUDE.local.md": "G9a ancestor local\n",
+            "A/B/CLAUDE.local.md": "<!-- G9a comment only -->\n",
+            "A/B/proj/CLAUDE.local.md": "G9a cwd local\n",
+            "A/B/proj/.claude/CLAUDE.local.md": "G9a cwd .claude local\n",
+            "A/B/proj/.claude/rules/r.md": "G9a cwd rule\n",
+            "A/B/proj/pkg/CLAUDE.local.md": "G9a nested local\n",
+            "A/B/proj/pkg/.claude/CLAUDE.local.md": "G9a nested .claude local\n",
+            "A/B/proj/pkg/.claude/rules/r.md": "G9a nested rule\n",
+            "A/B/proj/pkg/a.txt": "a\n",
+            "A/B/proj/deep/CLAUDE.local.md": "G9a intermediate local\n",
+            "A/B/proj/deep/sub/a.txt": "a\n",
+            "A/B/proj/blank/CLAUDE.local.md": "\n  \n",
+            "A/B/proj/blank/a.txt": "a\n",
+            "A/B/other/CLAUDE.local.md": "G9a local beside the cwd\n",
+            "A/B/other/a.txt": "a\n",
+        },
+        "probes": [
+            {
+                "read": ["A/B/proj/pkg/a.txt", "A/B/proj/deep/sub/a.txt", "A/B/proj/blank/a.txt"],
+                "setting_sources": LOCAL,
+            },
+            {"read": ["A/B/proj/pkg/a.txt", "A/B/proj/deep/sub/a.txt", "A/B/proj/blank/a.txt"]},
+            {"read": ["A/B/other/a.txt"], "setting_sources": LOCAL},
+            {"read": ["A/B/proj/pkg/CLAUDE.local.md"], "setting_sources": LOCAL},
+        ],
+    }
+)
+cases.append(
+    {
+        "id": "G9-local-paths",
+        "group": "G9",
+        "cwd": "A/proj",
+        "tree": {
+            "A/CLAUDE.local.md": scoped('paths: "proj/src/**"', "G9b ancestor local scoped"),
+            "A/proj/CLAUDE.local.md": scoped('paths: "src/**"', "G9b cwd local scoped"),
+            "A/proj/pkg/CLAUDE.local.md": scoped('paths: "*.ts"', "G9b nested glob missing"),
+            "A/proj/lib/CLAUDE.local.md": scoped('paths: "/b.ts"', "G9b nested own-dir glob"),
+            "A/proj/doc/CLAUDE.local.md": scoped('paths: "/doc/c.ts"', "G9b nested cwd glob"),
+            "A/proj/src/a.ts": "a\n",
+            "A/proj/pkg/a.txt": "a\n",
+            "A/proj/lib/b.ts": "b\n",
+            "A/proj/doc/c.ts": "c\n",
+        },
+        "probes": [
+            {
+                "read": [
+                    "A/proj/src/a.ts",
+                    "A/proj/pkg/a.txt",
+                    "A/proj/lib/b.ts",
+                    "A/proj/doc/c.ts",
+                ],
+                "setting_sources": LOCAL,
+            }
+        ],
+    }
+)
+cases.append(
+    {
+        "id": "G9-local-imports",
+        "group": "G9",
+        "cwd": "proj",
+        "tree": {
+            "proj/CLAUDE.local.md": (
+                "G9c local with imports\n"
+                "@notes/line.md\n"
+                "See @notes/inline.md for more.\n"
+                "Ask oracle@notes/attached.md about it.\n"
+                "Code span: `@notes/span.md`\n"
+                "\n"
+                "```text\n"
+                "@notes/fenced.md\n"
+                "```\n"
+                "\n"
+                "    @notes/indented.md\n"
+                "\n"
+                "<!--\n"
+                "@notes/commented.md\n"
+                "-->\n"
+            ),
+            "proj/notes/line.md": "G9c line\n",
+            "proj/notes/inline.md": "G9c inline\n",
+            "proj/notes/attached.md": "G9c attached\n",
+            "proj/notes/span.md": "G9c span\n",
+            "proj/notes/fenced.md": "G9c fenced\n",
+            "proj/notes/indented.md": "G9c indented\n",
+            "proj/notes/commented.md": "G9c commented\n",
+            "proj/zz-sentinel.txt": "sentinel\n",
+        },
+        "probes": [{"read": ["proj/zz-sentinel.txt"], "setting_sources": LOCAL}],
+    }
+)
+cases.append(
+    {
+        "id": "G9-local-links",
+        "group": "G9",
+        "cwd": "proj",
+        "requires": ["symlink"],
+        "tree": {
+            "root-local.md": "G9d ancestor local linked beside it\n",
+            "CLAUDE.local.md": {"symlink": "root-local.md"},
+            "outside/cwd-local.md": "G9d cwd local linked outside the cwd\n",
+            "proj/CLAUDE.local.md": {"symlink": "../outside/cwd-local.md"},
+            "outside/pkg-local.md": "G9d nested local linked outside the cwd\n",
+            "proj/pkg/CLAUDE.local.md": {"symlink": "../../outside/pkg-local.md"},
+            "proj/shared/lib-local.md": "G9d nested local linked inside the cwd\n",
+            "proj/lib/CLAUDE.local.md": {"symlink": "../shared/lib-local.md"},
+            "proj/broken/CLAUDE.local.md": {"symlink": "missing.md"},
+            "proj/pkg/a.txt": "a\n",
+            "proj/lib/a.txt": "a\n",
+            "proj/broken/a.txt": "a\n",
+        },
+        "probes": [
+            {
+                "read": ["proj/pkg/a.txt", "proj/lib/a.txt", "proj/broken/a.txt"],
+                "setting_sources": LOCAL,
+            }
+        ],
+    }
+)
+cases.append(
+    {
+        "id": "G9-local-worktree",
+        "group": "G9",
+        "cwd": "M/.claude/worktrees/w1",
+        "requires": ["git"],
+        "tree": {
+            "CLAUDE.local.md": "G9e local above the repository\n",
+            "M/.gitignore": "CLAUDE.local.md\n",
+            "M/CLAUDE.local.md": "G9e main repository local\n",
+            "M/.claude/worktrees/CLAUDE.local.md": "G9e local between repository and worktree\n",
+            "M/f": "f\n",
+        },
+        "setup": [
+            {"cwd": "M", "run": ["git", "init", "-q"]},
+            {"cwd": "M", "run": ["git", *git_env, "add", "."]},
+            {"cwd": "M", "run": ["git", *git_env, "commit", "-q", "-m", "init"]},
+            {"cwd": "M", "run": ["git", "worktree", "add", "-q", ".claude/worktrees/w1"]},
+            {
+                "cwd": "M/.claude/worktrees/w1",
+                "run": ["sh", "-c", "printf 'G9e worktree local\\n' > CLAUDE.local.md"],
+            },
+        ],
+        "probes": [{"read": ["M/.claude/worktrees/w1/f"], "setting_sources": LOCAL}],
     }
 )
 
