@@ -23,7 +23,7 @@ def test_version_prints_the_package_version() -> None:
     result = run_cli("--version")
 
     assert result.returncode == 0
-    assert result.stdout == b"c2c-rulesync 0.2.0\n"
+    assert result.stdout == b"c2c-rulesync 0.3.0\n"
 
 
 def test_help_prints_usage_to_stdout() -> None:
