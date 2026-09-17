@@ -177,6 +177,92 @@ def test_home_rules_load_as_project_rules_beside_another_config_directory(
     ]
 
 
+def write_settings(directory: Path, settings: object) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "settings.json").write_text(json.dumps(settings))
+
+
+@pytest.mark.parametrize("config", ["{home}/.claude-extra", "~/.claude-extra"])
+def test_claude_md_excludes_of_the_user_settings_file_drop_home_rules(
+    codex: Codex, config: str
+) -> None:
+    project = codex.home / "work" / "spec"
+    project.mkdir(parents=True)
+    python = '---\npaths: "*.py"\n---\nComment Python.\n'
+    for directory in (".claude-extra", ".claude"):
+        (codex.home / directory / "rules").mkdir(parents=True)
+        (codex.home / directory / "rules" / "comments-python.md").write_text(python)
+    (codex.home / ".claude" / "rules" / "context7.md").write_text("Use Context7.\n")
+    write_settings(
+        codex.home / ".claude-extra", {"claudeMdExcludes": [f"{codex.home}/.claude/rules/**"]}
+    )
+    # Settings of a configuration directory not in use apply nothing.
+    write_settings(
+        codex.home / ".claude", {"claudeMdExcludes": [f"{codex.home}/.claude-extra/rules/**"]}
+    )
+
+    codex.environ["CLAUDE_CONFIG_DIR"] = config.format(home=codex.home)
+    assert codex.send("SessionStart", cwd=str(project)) is None
+    assert rule_paths(codex.bash("cat src/a.py", cwd=str(project))) == [
+        "~/.claude-extra/rules/comments-python.md"
+    ]
+
+
+def test_claude_md_excludes_follow_a_relative_config_directory(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n"})
+    write_settings(
+        codex.project / "config", {"claudeMdExcludes": [f"{codex.project}/.claude/rules/*"]}
+    )
+
+    codex.environ["CLAUDE_CONFIG_DIR"] = "config"
+    assert codex.send("SessionStart") is None
+
+
+@pytest.mark.parametrize("value", [None, "", "1", "false", " 0", "0 ", "0"])
+def test_only_0_turns_claude_md_excludes_off(codex: Codex, value: str | None) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n", ".claude/rules/kept.md": "Kept.\n"})
+    write_settings(
+        codex.home / ".claude", {"claudeMdExcludes": [f"{codex.project}/.claude/rules/style.md"]}
+    )
+    if value is not None:
+        codex.environ["C2C_RULESYNC_CLAUDE_MD_EXCLUDES"] = value
+
+    delivered = rule_paths(codex.send("SessionStart"))
+
+    if value == "0":
+        assert delivered == [".claude/rules/kept.md", ".claude/rules/style.md"]
+    else:
+        assert delivered == [".claude/rules/kept.md"]
+
+
+def test_claude_md_excludes_apply_with_user_rules_off_and_need_a_config_directory(
+    codex: Codex,
+) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n"})
+    write_settings(codex.home / ".claude", {"claudeMdExcludes": [f"{codex.project}/**"]})
+
+    codex.environ["C2C_RULESYNC_USER_RULES"] = "0"
+    assert codex.send("SessionStart", session_id="s-1") is None
+    del codex.environ["HOME"]
+    assert rule_paths(codex.send("SessionStart", session_id="s-2")) == [".claude/rules/style.md"]
+
+
+def test_unusable_settings_are_warned_about_once_and_exclude_nothing(codex: Codex) -> None:
+    codex.write({".claude/rules/style.md": "Use tabs.\n"})
+    (codex.home / ".claude").mkdir()
+    (codex.home / ".claude" / "settings.json").write_text('{"claudeMdExcludes": ["x"],}')
+
+    first = codex.send("SessionStart")
+
+    assert rule_paths(first) == [".claude/rules/style.md"]
+    assert first is not None
+    assert (
+        f"c2c-rulesync: {codex.home}/.claude/settings.json: not valid JSON; "
+        "its claudeMdExcludes are not applied"
+    ) in first["systemMessage"]
+    assert codex.bash("cat README") is None
+
+
 @pytest.mark.parametrize("value", [None, "", "0", "true", "yes", " 1", "1 "])
 def test_local_instructions_need_exactly_1(codex: Codex, value: str | None) -> None:
     codex.write({".claude/rules/style.md": "Use tabs.\n", "CLAUDE.local.md": "Mine.\n"})

@@ -15,9 +15,9 @@ working directory and the file. Unlike rules, their ``paths`` never keep them
 from loading, links to them are followed anywhere, and a git worktree does not
 skip them.
 
-``RuleFinder`` reproduces both, and ``SessionRules`` keeps a session from
-loading a rule twice. Behavior and its evidence are documented in
-``docs/behavior.md``.
+``RuleFinder`` reproduces both, leaving out the files ``claudeMdExcludes``
+patterns match, and ``SessionRules`` keeps a session from loading a rule twice.
+Behavior and its evidence are documented in ``docs/behavior.md``.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import stat
 
+from c2c_rulesync.excludes import Excludes
 from c2c_rulesync.frontmatter import js_trim, parse_rule_text
 from c2c_rulesync.ignore import Matcher
 from c2c_rulesync.imports import import_references
@@ -92,6 +93,8 @@ class RuleFinder:
         local_instructions: Whether to load ``CLAUDE.local.md`` files too, as
             Claude Code does with the ``local`` setting source.
         home: The home directory ``@~/`` imports name, or ``None``.
+        excludes: ``claudeMdExcludes`` patterns; a file they match does not load.
+            Their warnings become the finder's first warnings.
     """
 
     def __init__(
@@ -101,6 +104,7 @@ class RuleFinder:
         *,
         local_instructions: bool = False,
         home: str | None = None,
+        excludes: Excludes | None = None,
     ) -> None:
         self.cwd = os.path.realpath(cwd)
         spelling = os.path.normpath(os.path.abspath(cwd))
@@ -108,9 +112,11 @@ class RuleFinder:
         self.user_rules_dir = user_rules_dir
         self.local_instructions = local_instructions
         self.home = home
-        self.warnings: list[str] = []
+        self.warnings: list[str] = [] if excludes is None else list(excludes.warnings)
+        self._excludes = excludes if excludes is not None and excludes.active else None
+        self._excluded_paths: dict[str, bool] = {}
         self._rule_cache: dict[str, Rule | None] = {}
-        self._files: dict[tuple[str, str], list[str]] = {}
+        self._files: dict[tuple[str, str], list[tuple[str, str]]] = {}
         self._matchers: dict[tuple[str, ...], Matcher] = {}
         self._worktree = _nested_worktree(self.cwd)
         self._all_levels: list[str] | None = None
@@ -229,15 +235,13 @@ class RuleFinder:
         try:
             mode = os.stat(entry).st_mode
         except OSError:
-            if os.path.islink(entry):
+            if os.path.islink(entry) and not self._excluded(_local_path(directory)):
                 self.warnings.append(f"{entry}: a link that cannot be followed; skipped")
             return []
         if not stat.S_ISREG(mode):
             return []
-        # Claude Code 2.1.273 names a linked CLAUDE.local.md by the link, not by
-        # the file it leads to (G9-local-links), unlike a linked rule file.
-        path = os.path.join(os.path.realpath(directory), _LOCAL_INSTRUCTIONS)
-        if path in processed:
+        path = _local_path(directory)
+        if path in processed or self._excluded(path):
             return []
         processed.add(path)
         # An import is relative to the file that holds it; for a link, either
@@ -281,11 +285,13 @@ class RuleFinder:
         """Load the rules under ``rules_dir`` that have globs, or that have none.
 
         Every rule file a walk reaches counts as processed, whatever its globs,
-        so a later walk in the same scan does not load it again.
+        so a later walk in the same scan does not load it again. An excluded
+        file does not count, so the same file reached another way can still
+        load (G10-excludes-links).
         """
         found: list[Rule] = []
-        for path in self._rule_files(rules_dir, source):
-            if path in processed:
+        for spelled, path in self._rule_files(rules_dir, source):
+            if path in processed or self._excluded(spelled, path):
                 continue
             processed.add(path)
             rule = self._read_rule(path, source)
@@ -295,20 +301,30 @@ class RuleFinder:
                 found.append(rule)
         return found
 
-    def _rule_files(self, rules_dir: str, source: str) -> list[str]:
-        """Resolved paths of the rule files under ``rules_dir``, in walk order."""
+    def _rule_files(self, rules_dir: str, source: str) -> list[tuple[str, str]]:
+        """The rule files under ``rules_dir``, in walk order.
+
+        Each is a pair: the path through ``rules_dir`` and the directories below
+        it as they are named, links included, and the resolved path.
+        """
         key = (rules_dir, source)
         files = self._files.get(key)
         if files is None:
             files = []
-            self._collect(rules_dir, source, files, set(), 0)
+            self._collect(rules_dir, source, files, set(), 0, rules_dir)
             self._files[key] = files
         return files
 
     def _collect(
-        self, rules_dir: str, source: str, files: list[str], visited: set[str], depth: int
+        self,
+        rules_dir: str,
+        source: str,
+        files: list[tuple[str, str]],
+        visited: set[str],
+        depth: int,
+        spelled_dir: str,
     ) -> None:
-        """Add the rule files under ``rules_dir`` to ``files``.
+        """Add the rule files under ``rules_dir``, named ``spelled_dir``, to ``files``.
 
         Links are followed. For project rules, a rules directory that is itself
         a link must resolve inside the working directory, and so must an entry
@@ -344,11 +360,12 @@ class RuleFinder:
                 # Claude Code's runtime cannot open such names and skips them.
                 continue
             entry = os.path.join(rules_dir, name)
+            spelled = os.path.join(spelled_dir, name)
             resolved = os.path.realpath(entry)
             try:
                 mode = os.stat(entry).st_mode
             except OSError:
-                if os.path.islink(entry):
+                if os.path.islink(entry) and not self._excluded(spelled):
                     self.warnings.append(f"{entry}: a link that cannot be followed; skipped")
                 continue
             points_elsewhere = resolved != os.path.join(resolved_dir, name)
@@ -359,9 +376,27 @@ class RuleFinder:
             ):
                 continue
             if stat.S_ISDIR(mode):
-                self._collect(resolved, source, files, visited, depth + 1)
+                self._collect(resolved, source, files, visited, depth + 1, spelled)
             elif stat.S_ISREG(mode) and name.endswith(".md"):
-                files.append(resolved)
+                files.append((spelled, resolved))
+
+    def _excluded(self, *paths: str) -> bool:
+        """Whether a ``claudeMdExcludes`` pattern matches any of ``paths``.
+
+        A rule file is excluded by its path as named under its rules directory or
+        by its resolved path (G10-excludes-links, and documented since Claude
+        Code 2.1.239).
+        """
+        if self._excludes is None:
+            return False
+        for path in paths:
+            normalized = os.path.normpath(os.path.abspath(path))
+            excluded = self._excluded_paths.get(normalized)
+            if excluded is None:
+                excluded = self._excluded_paths[normalized] = self._excludes.matches(normalized)
+            if excluded:
+                return True
+        return False
 
     def _read_rule(self, path: str, source: str, import_bases: tuple[str, ...] = ()) -> Rule | None:
         key = f"{source}\0{path}"
@@ -430,6 +465,17 @@ class SessionRules:
         records a read before it loads the rules the read triggers.
         """
         self.loaded.add(os.path.normpath(file_path))
+
+
+def _local_path(directory: str) -> str:
+    """The name of ``directory``'s ``CLAUDE.local.md``.
+
+    Claude Code 2.1.273 names a linked CLAUDE.local.md by the link, not by the
+    file it leads to (G9-local-links), unlike a linked rule file, and only a
+    claudeMdExcludes pattern that matches this name excludes it
+    (G10-excludes-links).
+    """
+    return os.path.join(os.path.realpath(directory), _LOCAL_INSTRUCTIONS)
 
 
 def _names_file(reference: str, bases: tuple[str, ...], home: str | None) -> bool:

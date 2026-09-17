@@ -8,6 +8,11 @@ rebuild every tree and check that c2c-rulesync predicts the same loads.
 A probe whose ``setting_sources`` include ``local`` also loaded CLAUDE.local.md
 files, and the files they import. c2c-rulesync does not expand imports; it warns
 about them, so the warning must name each imported file instead.
+
+G10 probes recorded ``claudeMdExcludes`` from the working directory's
+``.claude/settings.json``, the only settings file those sessions could read.
+c2c-rulesync reads the patterns from the user settings file instead; the replay
+passes the recorded ones to the same matcher.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from c2c_rulesync.excludes import load_excludes
 from c2c_rulesync.imports import import_references
 from c2c_rulesync.rules import LOCAL, Rule, RuleFinder, SessionRules
 
@@ -58,6 +64,12 @@ def probe_key(probe: dict[str, Any]) -> str:
 
 
 def unmet_requirement(case: dict[str, Any], root: Path) -> str | None:
+    # The root is spelled into recorded patterns, where glob syntax would change them.
+    spells_root = any(
+        "{root}" in content for content in case["tree"].values() if isinstance(content, str)
+    )
+    if spells_root and (any(char in str(root) for char in '*?[]{}()!|\\"') or "/." in str(root)):
+        return "the temporary directory's path contains glob syntax"
     for requirement in case.get("requires", []):
         if requirement == "git" and shutil.which("git") is None:
             return "git is not installed"
@@ -129,8 +141,12 @@ def test_rule_loads_match_claude_code(
         pytest.skip(reason)
     build_tree(root, case)
     cwd = root / probe.get("cwd", case["cwd"])
-    local = "local" in probe.get("setting_sources", "project").split(",")
-    finder = RuleFinder(str(cwd), user_rules_dir=None, local_instructions=local)
+    sources = probe.get("setting_sources", "project").split(",")
+    settings = cwd / ".claude" / "settings.json"
+    excludes = load_excludes(str(settings)) if "project" in sources else None
+    finder = RuleFinder(
+        str(cwd), user_rules_dir=None, local_instructions="local" in sources, excludes=excludes
+    )
     session = SessionRules()
 
     delivered: list[Rule] = session.take(finder.session_start_rules())
