@@ -73,7 +73,7 @@ jobs:
         run: |
           set -eu
           wheel="$(ls dist/*.whl)"
-          test "$(uv run --isolated --no-project --with "$wheel" c2c-rulesync --version)" = "c2c-rulesync 0.1.0"
+          test "$(uv run --isolated --no-project --with "$wheel" c2c-rulesync --version)" = "c2c-rulesync 0.2.0"
           out="$(printf '{}' | uv run --isolated --no-project --with "$wheel" c2c-rulesync hook)"
           test -z "$out"
 

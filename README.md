@@ -15,7 +15,7 @@ under the same conditions Claude Code 2.1.273 loads them.
 [docs/behavior.md](docs/behavior.md) specifies what loads when, and every known
 difference from Claude Code.
 
-> **Status:** 0.1.0, the first release. Checked against Claude Code 2.1.273
+> **Status:** 0.2.0. Checked against Claude Code 2.1.273
 > and Codex CLI 0.154.0.
 
 ## Requirements
@@ -28,7 +28,7 @@ difference from Claude Code.
 ## Install
 
 ```bash
-uv tool install git+https://github.com/92khsang/c2c-rulesync@v0.1.0
+uv tool install git+https://github.com/92khsang/c2c-rulesync@v0.2.0
 c2c-rulesync --version
 ```
 
