@@ -1,5 +1,6 @@
-c2c-rulesync is a Codex CLI command hook that loads Claude Code `.claude/rules/*.md` files into
-Codex under the conditions Claude Code 2.1.273 loads them. It is a Python port of codex-path-rules.
+c2c-rulesync is a Codex CLI command hook that loads Claude Code `.claude/rules/*.md` files, and on
+request `CLAUDE.local.md` files, into Codex under the conditions Claude Code 2.1.273 loads them. It
+is a Python port of codex-path-rules.
 
 ## Rules
 
@@ -17,7 +18,8 @@ Codex under the conditions Claude Code 2.1.273 loads them. It is a Python port o
   Describe Claude Code behavior as observed results, and cite public URLs, upstream commits, or
   committed test data.
 - Build rule trees for tests under `tmp_path`. Never commit a `.claude/rules` directory under
-  `tests/`: Claude Code and this hook would load it as real instructions.
+  `tests/`, or a `CLAUDE.local.md` anywhere: Claude Code and this hook would load it as real
+  instructions.
 
 ## Commands
 

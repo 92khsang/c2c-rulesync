@@ -1,8 +1,9 @@
 # Behavior
 
-c2c-rulesync makes Codex load Claude Code rule files under the conditions
-Claude Code loads them. This document specifies those conditions, where they
-come from, and where c2c-rulesync deliberately or unavoidably differs.
+c2c-rulesync makes Codex load Claude Code rule files, and on request
+`CLAUDE.local.md` files, under the conditions Claude Code loads them. This
+document specifies those conditions, where they come from, and where
+c2c-rulesync deliberately or unavoidably differs.
 
 Target versions: Claude Code **2.1.273**. Claude Code changes quickly, so every
 statement here is about that version unless it says otherwise.
@@ -23,7 +24,8 @@ statement is observed in Claude Code 2.1.273. The project-rule behaviors below
 are also oracle-confirmed by the cases in
 [Recorded Claude Code sessions](#recorded-claude-code-sessions), except the
 4 MiB limit and unreadable git files; user rules, and what c2c-rulesync itself
-adds (sorting, warnings, the depth limit), are not.
+adds (sorting, warnings, the depth limit), are not. `CLAUDE.local.md` files are
+described in [Local instructions](#local-instructions-claudelocalmd).
 
 ### Where rules live
 
@@ -129,17 +131,68 @@ ancestors above the main repository still load.
   `Proj` to `proj/shared.md` counts as inside `Proj`.
 - User rules may link anywhere.
 
+### Local instructions (`CLAUDE.local.md`)
+
+Claude Code loads `CLAUDE.local.md` files, private instructions kept out of
+version control, when its `local` setting source is on, which it is by default
+([documented](https://code.claude.com/docs/en/memory)). c2c-rulesync delivers
+them only with `C2C_RULESYNC_LOCAL_INSTRUCTIONS=1`: once delivered, their text
+is stored in Codex's session files. The G9 recordings show, for Claude Code
+2.1.273 (oracle-confirmed):
+
+- Without the `local` source, no `CLAUDE.local.md` loads.
+- At session start, the `CLAUDE.local.md` of the working directory and of each
+  ancestor loads. When a file is read, those of the directories strictly between
+  the working directory and the file load; a file outside the working directory
+  loads none.
+- Only `<directory>/CLAUDE.local.md` counts: `.claude/CLAUDE.local.md` does not
+  load.
+- A file whose body is empty after comments are removed does not load.
+- Reading a `CLAUDE.local.md` by its own path counts as loading it.
+- `paths:` front matter never keeps the file from loading. At session start it
+  loads regardless, and a nested one loads on any read in its directory, even
+  one its globs do not match; Claude Code only reports its globs.
+- Links are followed wherever they lead, including out of the working directory
+  and from an ancestor; a broken link loads nothing, and c2c-rulesync warns.
+- A git worktree nested in its main repository does not skip them: the main
+  repository's `CLAUDE.local.md`, and one between it and the worktree, load.
+- Claude Code imported `@path` written at the start of a line or after white
+  space, and not one attached to a word, in a code span, in a fenced or indented
+  code block, or inside an HTML comment.
+
+What c2c-rulesync decides itself:
+
+- A directory's `CLAUDE.local.md` follows that directory's rules. The
+  documentation says it is appended after `CLAUDE.md`; the recordings cannot
+  show order.
+- The body is read like a rule's: front matter and block-level HTML comments
+  are removed, invalid UTF-8 is replaced with a warning, and a file over 4 MiB
+  is skipped (documented for CLAUDE.md files). What Claude Code injects is not
+  recorded.
+- Imports are not expanded. Claude Code resolves them relative to the file,
+  follows up to four hops, and asks once before importing files outside the
+  working directory (documented). c2c-rulesync delivers the text as written and
+  warns, naming every `@` token at the start of a line or after white space,
+  outside code spans and fenced code blocks, without trailing sentence
+  punctuation. That also names tokens Claude Code did not import, such as one in
+  an indented code block. The documentation's advice to share instructions
+  across worktrees with an `@~/.claude/...` import does not carry over to Codex:
+  write the text into the file, or into a user rule.
+- `CLAUDE.md` files are not delivered: they usually import `AGENTS.md`, which
+  Codex 0.154.0 loads by itself.
+
 ### Not implemented
 
 Claude Code also loads instructions that c2c-rulesync does not bring to Codex:
 
-- `CLAUDE.md` and `CLAUDE.local.md` files, at any level;
+- `CLAUDE.md` files at any level, and `CLAUDE.local.md` files unless
+  `C2C_RULESYNC_LOCAL_INSTRUCTIONS=1`;
 - the managed (system-wide) rules directory;
 - directories added with `--add-dir` or `permissions.additionalDirectories`:
   Claude Code loads rules for files read there, and with
   `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` their rules at session start.
   Codex does not pass its added directories to hooks;
-- `@path` imports inside rule files;
+- `@path` imports inside rule files and `CLAUDE.local.md` files;
 - rules linked from outside the working directory after a project approved
   external imports in Claude Code, which then load at session start;
 - `claudeMdExcludes` settings.
@@ -289,6 +342,12 @@ Limits of the Codex events:
   changes to later are not delivered.
 - A file edited by `apply_patch` without a prior read loads its rules just
   before the patch applies, after the model has already written the patch.
+- With `C2C_RULESYNC_LOCAL_INSTRUCTIONS=1`, the start-time `CLAUDE.local.md`
+  files come with the session start rules, so a thread that received those
+  before the variable was set, or before upgrading, gets them only after
+  compaction or in a new session. After compaction c2c-rulesync sends them
+  again, while Claude Code's documentation names only the project-root
+  `CLAUDE.md` as read again (not recorded).
 
 ### Threads without a transcript
 
@@ -350,20 +409,24 @@ as developer messages in each session's rollout file. With Codex CLI 0.154.0
 - hooks defined in a trusted project `.codex/config.toml` behave the same as
   hooks passed with `-c`.
 
+Run again with `C2C_RULESYNC_EPHEMERAL_RULES=0` in its environment (same Codex
+version and model, September 2026), the same checks passed: the setting leaves
+sessions that have a transcript their rules.
+
 It uses the developer's Codex login and configuration, including their own
-hooks, and never runs in CI. Compaction, subagents and side conversations are
-not exercised.
+hooks, and never runs in CI. Compaction, subagents, side conversations and
+`CLAUDE.local.md` files are not exercised.
 
 ### Output
 
-Rules reach the model as one `<rule path="...">` element each, joined by blank
-lines, in load order. The path is relative to the working directory when inside
-it, otherwise under `~` when possible. A `</rule>` inside a rule is written
-`<\/rule>`. The user-facing hook message lists the rules loaded and each
-warning once per thread until compaction (up to 2,000 warnings). Output is
-ASCII-only JSON with only the keys Codex accepts for the event. With
-`additionalContextLimit = 0`, as the README configures, Codex does not limit
-the size of the injected rules.
+Rules, and `CLAUDE.local.md` files, reach the model as one `<rule path="...">`
+element each, joined by blank lines, in load order. The path is relative to the
+working directory when inside it, otherwise under `~` when possible. A
+`</rule>` inside a rule is written `<\/rule>`. The user-facing hook message
+lists the rules loaded and each warning once per thread until compaction (up to
+2,000 warnings). Output is ASCII-only JSON with only the keys Codex accepts for
+the event. With `additionalContextLimit = 0`, as the README configures, Codex
+does not limit the size of the injected rules.
 
 ## Recorded Claude Code sessions
 
@@ -372,13 +435,15 @@ the size of the injected rules.
 labeled oracle-confirmed in this document are covered by these recordings.
 
 `tests/parity/cases.json` (written by `scripts/gen_parity_cases.py`) describes
-25 cases with 44 probes: a file tree, the directory a session starts in, and the files each
-session reads. `scripts/claude_parity_oracle.py` builds each tree under `/tmp`,
-runs one `claude -p --model haiku` session per probe that may call only the
-Read tool on the probe files, and records the `InstructionsLoaded` hook events:
-which rule files loaded at session start, and which loaded after each read, with
-the reason and the normalized globs. A `CLAUDE.md` in the working directory
-confirms that the hook ran and is left out of the recording.
+30 cases with 52 probes: a file tree, the directory a session starts in, and the
+files each session reads. `scripts/claude_parity_oracle.py` builds each tree
+under `/tmp`, runs one `claude -p --model haiku` session per probe that may call
+only the Read tool on the probe files, and records the `InstructionsLoaded` hook
+events: which files loaded at session start, and which loaded after each read,
+with the reason and the normalized globs. A `CLAUDE.md` in the working directory
+confirms that the hook ran and is left out of the recording. Sessions run with
+`--setting-sources project`; a probe's `setting_sources` replaces that, and the
+G9 probes add `local`.
 
 | Group | What it covers |
 |---|---|
@@ -390,15 +455,19 @@ confirms that the hook ran and is left out of the recording.
 | G5 | Git worktrees: nested in their repository, of a bare repository, and with a stale record. |
 | G6 | Links: to rule files and directories inside and outside the working directory, in ancestors, under a linked `.claude` or `.claude/rules`, broken and cyclic links, reads through links leaving or entering the working directory, the `$PWD` spelling, and case-variant targets. |
 | G8 | A rule loads once per session; reading a rule file by its own path counts, and through a link it does not. |
+| G9 | `CLAUDE.local.md`: the `local` setting source, ancestor, working-directory, nested and intermediate files, files outside the working directory, empty files, `.claude/CLAUDE.local.md`, reading the file by its own path, `paths:` front matter, imports, links and a nested git worktree. |
 
 The recordings compare which files load and with which globs, not the order of
 loads or the text injected: the hook sees neither. The oracle also records a
 probe whose Read fails, so a missing load is not mistaken for a rule; none of
 the recorded reads failed.
 
-One recorded difference is intended: Claude Code loads rules for files in
+Two recorded differences are intended. Claude Code loads rules for files in
 `--add-dir` directories, which Codex does not pass to hooks
-(`LAZY_DIVERGENCES` in `tests/test_parity.py`).
+(`LAZY_DIVERGENCES` in `tests/test_parity.py`). Claude Code loads the files a
+`CLAUDE.local.md` imports, recorded as `include` loads; c2c-rulesync does not
+expand imports, so the replay checks instead that its import warning names each
+of them.
 
 Not recorded:
 
@@ -406,10 +475,12 @@ Not recorded:
   only under the developer's own login;
 - a rules directory shared by user and project scope, approved external
   imports, and the other behaviors described without the oracle-confirmed
-  label.
+  label;
+- `CLAUDE.local.md` at the filesystem root, over 4 MiB or with invalid UTF-8,
+  after compaction, and with imports from outside the working directory.
 
-Recording calls a paid model (the 44 probes reported about $0.60 in September
-2026) and never runs in CI:
+Recording calls a paid model (the first 44 probes reported about $0.60, and the
+8 G9 probes $0.12, in September 2026) and never runs in CI:
 
 ```bash
 python3 scripts/gen_parity_cases.py tests/parity/cases.json
